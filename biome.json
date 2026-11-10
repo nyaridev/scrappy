@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/*.md", "!src/lib/types", "!extension/.output", "!extension/.wxt"]
+    "includes": ["**", "!**/*.md", "!src/lib/types", "!extension/lib/types", "!extension/.output", "!extension/.wxt"]
   },
   "formatter": {
     "enabled": true,

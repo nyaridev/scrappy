@@ -1,7 +1,25 @@
-/* App layout: the header over the selected view. Only iro-ui tokens, never raw values. */
+/* App layout: the header over the selected view, on the backdrop. Only iro-ui tokens, never raw values. */
 
+/* A desktop window, not a page: plain arrow cursor and no text selection, except where text is typed and where
+   `.selectable` marks something worth copying (a saved file's path, an error). */
 body {
   margin: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .root {
@@ -10,20 +28,21 @@ body {
 }
 
 .app {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-/* Three columns: the name, the tabs centered in the window, the settings button. */
+/* Three columns: the name, the tabs centered in the window, the settings button. No fill or border: the backdrop
+   runs under it, so it reads as part of the window. */
 .header {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   gap: var(--iro-space-4);
   align-items: center;
   padding: var(--iro-space-2) var(--iro-space-4);
-  background: var(--iro-surface);
-  border-bottom: 1px solid var(--iro-line);
 }
 
 .brand {
@@ -33,7 +52,32 @@ body {
 }
 
 .header-end {
+  grid-column: 3;
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
   justify-self: end;
+}
+
+/* ── Title bar (ADR-0011) ─────────────── */
+/* Dragging the window shouldn't select the name. */
+.header[data-tauri-drag-region] {
+  user-select: none;
+}
+
+/* macOS draws its window buttons over the header's left end. */
+.header[data-frame="overlay"] {
+  padding-left: calc(var(--iro-space-6) * 2);
+}
+
+.window-controls {
+  display: flex;
+  gap: var(--iro-space-1);
+}
+
+.window-close:hover {
+  color: var(--iro-danger);
+  background: var(--iro-danger-soft);
 }
 
 .view {
@@ -42,4 +86,691 @@ body {
   min-height: 0;
   padding: var(--iro-space-6);
   overflow: auto;
+}
+
+/* ── First run ─────────────────────────── */
+/* A centered page title over one card in the middle of the window. */
+.setup {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-self: center;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 15));
+}
+
+.setup-title {
+  margin: 0;
+  font-family: var(--iro-font-display);
+  font-size: var(--iro-text-2xl);
+  text-align: center;
+}
+
+.setup-card {
+  display: grid;
+  gap: var(--iro-space-5);
+}
+
+/* shortcut: iro-ui 1.0.1's TextField has no border-box sizing, so its border adds 2px and a slot button sits off
+   center; remove once iro-ui sets it. */
+.iro-text-field {
+  box-sizing: border-box;
+}
+
+.setup-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── Tool list ─────────────────────────── */
+.tool-list {
+  display: grid;
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Name and state on one line, what it's for on its own full-width line under them, progress under that. */
+.tool-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "name detail"
+    "about about"
+    "progress progress";
+  gap: var(--iro-space-1) var(--iro-space-4);
+  align-items: center;
+  font-size: var(--iro-text-sm);
+}
+
+.tool-name {
+  display: inline-flex;
+  grid-area: name;
+  gap: var(--iro-space-2);
+  align-items: center;
+  font-weight: 600;
+}
+
+.tool-about {
+  grid-area: about;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-xs);
+}
+
+.tool-detail {
+  display: inline-flex;
+  grid-area: detail;
+  gap: var(--iro-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  color: var(--iro-fg-3);
+  text-align: right;
+}
+
+.tool-row[data-state="installed"] .tool-detail {
+  color: var(--iro-success);
+}
+
+.tool-row[data-state="outdated"] .tool-detail {
+  color: var(--iro-warning);
+}
+
+.tool-row[data-state="error"] .tool-detail {
+  color: var(--iro-danger);
+}
+
+.tool-progress {
+  grid-area: progress;
+  margin-top: var(--iro-space-1);
+}
+
+/* ── Settings ──────────────────────────── */
+.settings {
+  display: grid;
+  gap: var(--iro-space-6);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 18));
+}
+
+.settings-section,
+.settings-row {
+  display: grid;
+  gap: var(--iro-space-3);
+}
+
+.settings-row {
+  gap: var(--iro-space-1);
+}
+
+/* A switch's label is only as wide as its toggle and text, so the empty row beside it doesn't toggle it. */
+.settings .iro-switch-label {
+  justify-self: start;
+}
+
+.settings-hint {
+  margin: 0;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* ── Download ──────────────────────────── */
+.download {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 22));
+}
+
+.download-card {
+  display: grid;
+  gap: var(--iro-space-5);
+}
+
+.download-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4);
+}
+
+.download-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Thumbnail on the left, title and facts beside it. */
+.probe {
+  display: grid;
+  grid-template-columns: calc(var(--iro-space-6) * 5) minmax(0, 1fr);
+  gap: var(--iro-space-4);
+  align-items: center;
+}
+
+.probe-thumbnail {
+  border-radius: var(--iro-radius-md);
+  overflow: hidden;
+}
+
+.probe-thumbnail-empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: var(--iro-surface-2);
+  color: var(--iro-fg-3);
+}
+
+.probe-text {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+}
+
+.probe-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-facts {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* The first entries of a playlist or profile, one line each. */
+.probe-items {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+}
+
+.probe-items li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Download list ─────────────────────── */
+.queue {
+  display: grid;
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Thumbnail at the left; title and preset, then where it is, then progress beside it; buttons at the right. */
+.queue-row {
+  display: grid;
+  grid-template-columns: calc(var(--iro-space-6) * 3) minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "thumb title preset actions"
+    "thumb detail detail actions"
+    "thumb progress progress actions";
+  gap: var(--iro-space-1) var(--iro-space-3);
+  align-items: center;
+  font-size: var(--iro-text-sm);
+}
+
+.queue-thumbnail {
+  grid-area: thumb;
+  align-self: start;
+  border-radius: var(--iro-radius-sm);
+  overflow: hidden;
+}
+
+.queue-thumbnail-empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: var(--iro-surface-2);
+  color: var(--iro-fg-3);
+}
+
+.queue-title {
+  grid-area: title;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-preset {
+  grid-area: preset;
+  color: var(--iro-fg-3);
+}
+
+.queue-detail {
+  display: flex;
+  grid-area: detail;
+  gap: var(--iro-space-2);
+  align-items: center;
+  min-width: 0;
+  color: var(--iro-fg-3);
+}
+
+.queue-detail-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-row[data-state="done"] .queue-detail {
+  color: var(--iro-success);
+}
+
+.queue-row[data-state="failed"] .queue-detail {
+  color: var(--iro-danger);
+}
+
+.queue-actions {
+  display: flex;
+  grid-area: actions;
+  gap: var(--iro-space-1);
+}
+
+.queue-progress {
+  grid-area: progress;
+}
+
+/* ── Home ──────────────────────────────── */
+.home {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 30));
+}
+
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--iro-space-4);
+}
+
+.home-section {
+  display: grid;
+  gap: var(--iro-space-3);
+  align-content: start;
+}
+
+/* The recent list beside the sites chart; stacked when the window is narrow. */
+.home-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 12), 1fr));
+  gap: var(--iro-space-5);
+  align-items: start;
+}
+
+.recent {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── Signed-in sites ───────────────────── */
+.sites {
+  display: grid;
+  gap: var(--iro-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The site, then how many cookies and when, then Forget at the right. */
+.site-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--iro-space-3);
+  align-items: center;
+  font-size: var(--iro-text-sm);
+}
+
+.site-name {
+  font-weight: 600;
+}
+
+.site-detail {
+  color: var(--iro-fg-3);
+}
+
+/* ── Grab ──────────────────────────────── */
+/* Wider than Download: the table has four columns. */
+.grab {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 32));
+}
+
+.grab-card,
+.grab-results {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+.grab-scanning {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+.grab-head {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+}
+
+.grab-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grab-facts {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* Type filters on the left, the download button on the right; they wrap on a narrow window. */
+.grab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.find-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-status {
+  display: inline-flex;
+  gap: var(--iro-space-1);
+  align-items: center;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+.find-status[data-state="done"] {
+  color: var(--iro-success);
+}
+
+.find-status[data-state="failed"] {
+  color: var(--iro-danger);
+}
+
+/* ── Gallery ───────────────────────────── */
+.gallery {
+  display: grid;
+  gap: var(--iro-space-4);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 44));
+}
+
+/* Search takes the room left; the three choices keep their size and wrap under it on a narrow window. */
+.gallery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-3);
+}
+
+.gallery-toolbar > * {
+  flex: 0 0 calc(var(--iro-space-6) * 5);
+}
+
+.gallery-toolbar > .gallery-search {
+  flex: 1 1 calc(var(--iro-space-6) * 8);
+}
+
+.gallery-count {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 8), 1fr));
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-end {
+  display: grid;
+  place-items: center;
+  min-height: var(--iro-space-6);
+}
+
+/* Thumbnail on top (the kind on its corner), then name and facts beside the folder button. */
+.tile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--iro-space-2);
+  align-items: center;
+}
+
+.tile-open {
+  position: relative;
+  grid-column: 1 / -1;
+  padding: 0;
+  border: 0;
+  border-radius: var(--iro-radius-md);
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+}
+
+.tile-open:disabled {
+  cursor: default;
+}
+
+.tile-open:focus-visible {
+  outline: calc(var(--iro-space-1) / 2) solid var(--iro-focus);
+  outline-offset: calc(var(--iro-space-1) / 2);
+}
+
+.tile-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.tile-thumb-empty {
+  display: grid;
+  place-items: center;
+  background: var(--iro-surface-2);
+  color: var(--iro-fg-3);
+}
+
+.tile-kind {
+  position: absolute;
+  top: var(--iro-space-2);
+  left: var(--iro-space-2);
+}
+
+.tile-text {
+  display: grid;
+  min-width: 0;
+}
+
+.tile-name {
+  display: block;
+  overflow: hidden;
+  font-size: var(--iro-text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-facts {
+  overflow: hidden;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile[data-missing] .tile-name,
+.tile[data-missing] .tile-facts {
+  color: var(--iro-fg-4);
+}
+
+/* ── Duplicates ────────────────────────── */
+.duplicates {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+.duplicates-bar,
+.duplicates-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-3);
+  align-items: center;
+}
+
+.duplicates-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.duplicates-summary {
+  justify-content: space-between;
+}
+
+.duplicates-progress {
+  display: grid;
+  gap: var(--iro-space-2);
+}
+
+.duplicates-note {
+  overflow: hidden;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicates-groups {
+  display: grid;
+  gap: var(--iro-space-5);
+}
+
+/* One group: its copies in a row, wrapping on a narrow window. */
+.copies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 8), 1fr));
+  gap: var(--iro-space-3);
+  margin: 0;
+  padding: var(--iro-space-3);
+  border-radius: var(--iro-radius-lg);
+  background: var(--iro-surface);
+  list-style: none;
+}
+
+.copy {
+  display: grid;
+  gap: var(--iro-space-2);
+  min-width: 0;
+}
+
+.copy-thumb {
+  position: relative;
+  border-radius: var(--iro-radius-md);
+  overflow: hidden;
+  background: var(--iro-surface-2);
+}
+
+/* A picked copy is going to the trash. */
+.copy[data-picked] .copy-thumb {
+  outline: calc(var(--iro-space-1) / 2) solid var(--iro-danger);
+}
+
+/* ── Scrape ────────────────────────────── */
+.scrape,
+.hunt {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 26));
+}
+
+.scrape-card,
+.scrape-status,
+.hunt-card,
+.hunt-status {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+.scrape-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 4), 1fr));
+  gap: var(--iro-space-3);
+}
+
+.scrape-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── Hunt ──────────────────────────────── */
+/* The topic, and the pack beside it. */
+.hunt-top {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--iro-space-3);
+}
+
+.hunt-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-2) var(--iro-space-5);
+}
+
+.hunt-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-2) var(--iro-space-4);
+}
+
+.hunt-duplicates {
+  display: grid;
+  align-content: start;
+}
+
+/* The counts, then the folder or page (copyable) and its buttons. */
+.scrape-counts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
+  gap: var(--iro-space-3);
+  align-items: center;
+  font-size: var(--iro-text-sm);
+}
+
+.scrape-folder {
+  overflow: hidden;
+  color: var(--iro-fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

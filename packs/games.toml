@@ -1,0 +1,4 @@
+# Games: the whole web, plus game wikis and art sites.
+name = "Games"
+web = true
+sites = ["fandom.com", "wikipedia.org", "artstation.com", "deviantart.com"]

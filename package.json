@@ -8,13 +8,14 @@
     "build": "tsc && vite build",
     "tauri": "tauri",
     "types": "cargo test -p scrappy-core export_bindings",
+    "register-host": "node scripts/register-host.mjs",
     "check": "node scripts/check-size.mjs && node scripts/check-boundaries.mjs && tsc && pnpm -C extension compile && biome check . && vitest run --passWithNoTests && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format": "biome check --write .",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "iro-ui": "github:nyaridev/iro-ui#v1.0.1",
+    "iro-ui": "github:nyaridev/iro-ui#v1.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

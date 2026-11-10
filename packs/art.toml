@@ -1,0 +1,4 @@
+# Art styles: the whole web, plus art sites.
+name = "Art styles"
+web = true
+sites = ["artstation.com", "deviantart.com", "behance.net", "wikiart.org"]

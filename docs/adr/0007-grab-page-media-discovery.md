@@ -32,3 +32,19 @@ can't do this on every platform.
 - **Harder:** the deep scan needs a Chromium browser installed, and some sites block headless browsers.
 - **Later:** a new media type is one entry in the classifier.
 - **Rules:** `.claude/rules/architecture/core.md`.
+
+## Implementation notes (M8)
+
+- `grab/find.rs` sorts a request or link into video, audio, stream, image or other by its MIME type, else its
+  extension; stream pieces (`.ts`, `.m4s`), page code and fonts are dropped. At most 2000 finds per page.
+- The deep scan (`grab/scan.rs`) uses `chromiumoxide` without its browser downloader. `tools::browser()` finds Chrome,
+  Brave or Edge. Each scan gets a new, empty profile in a temporary folder, so the user's cookies and history are never
+  opened. The user agent drops "Headless". After the page loads, its videos are played muted and the scan waits 8
+  seconds, then adds the page's image, media and anchor links.
+- Picked files are fetched as they are (up to 50 GB) with the page as Referer; streams go through yt-dlp with the
+  page as Referer and the default preset. Both are normal downloads and show in the Download list. The catalog kind is
+  `video`, `audio`, `image` or `file`, and the site is the page's domain.
+- `vsd` isn't added yet: it waits for a stream yt-dlp can't read.
+- "Grab all" in the extension sends the bridge's `grab` request: the page, its title and everything the extension
+  noted. The app sorts it, keeps it in `grab::Inbox` and brings its window forward; the window takes the page when it
+  starts and whenever it gains focus, so no new event is needed (ADR-0010).

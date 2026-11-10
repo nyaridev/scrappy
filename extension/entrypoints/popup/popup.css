@@ -1,0 +1,131 @@
+/* Popup layout: a fixed-width column, the switch on top, the rows under it. Only iro-ui tokens, never raw values. */
+
+body {
+  margin: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.popup {
+  display: grid;
+  gap: var(--iro-space-3);
+  align-content: start;
+  box-sizing: border-box;
+  width: calc(var(--iro-space-6) * 16);
+  min-height: calc(var(--iro-space-6) * 6);
+  max-height: calc(var(--iro-space-6) * 24);
+  padding: var(--iro-space-3);
+  overflow-y: auto;
+  background: var(--iro-bg);
+}
+
+/* "Grab all" on top, its error under it. */
+.popup-grab {
+  display: grid;
+  gap: var(--iro-space-1);
+}
+
+.popup-grab-error {
+  color: var(--iro-danger);
+  font-size: var(--iro-text-xs);
+}
+
+.popup-spinner {
+  justify-self: center;
+  margin-top: var(--iro-space-5);
+}
+
+.rows {
+  display: grid;
+  gap: var(--iro-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Preview, then name over format and size, then the send button. */
+.row {
+  display: grid;
+  grid-template-columns: calc(var(--iro-space-6) * 2) minmax(0, 1fr) auto;
+  gap: var(--iro-space-3);
+  align-items: center;
+  padding: var(--iro-space-2);
+  border-radius: var(--iro-radius-md);
+}
+
+.row:hover {
+  background: var(--iro-surface-2);
+}
+
+/* The sign-in question, across the whole row under it. */
+.row-ask {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: var(--iro-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: var(--iro-space-2) var(--iro-space-3);
+  border: 0;
+  border-radius: var(--iro-radius-sm);
+  background: var(--iro-surface);
+  font-size: var(--iro-text-xs);
+}
+
+.row-ask-actions {
+  display: flex;
+  gap: var(--iro-space-2);
+  justify-content: flex-end;
+}
+
+.row-preview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--iro-radius-sm);
+  overflow: hidden;
+  background: var(--iro-surface-2);
+  color: var(--iro-fg-3);
+}
+
+.row-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.row-text {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+}
+
+.row-name {
+  overflow: hidden;
+  font-size: var(--iro-text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-facts {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-xs);
+}
+
+.row-error {
+  color: var(--iro-danger);
+  font-size: var(--iro-text-xs);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.row-sent {
+  display: grid;
+  place-items: center;
+  width: calc(var(--iro-space-6) * 1.5);
+  color: var(--iro-success);
+}

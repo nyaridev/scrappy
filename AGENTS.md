@@ -8,7 +8,7 @@ rules load from the `CLAUDE.md` files above this folder; this file covers only w
 A desktop app (Windows, macOS, Linux) for Nari. It downloads videos and media from YouTube, X, Instagram, Facebook and
 any other site, finds everything downloadable on a page (including chunked streams), crawls and mirrors sites, hunts
 for images by topic with duplicate removal, and keeps a gallery and stats of it all. A small browser extension sends a
-page's videos and images to the app. Stage: M0 (scaffold) is done; `docs/adr/README.md` tracks the milestones.
+page's videos and images to the app. Stage: M13 (Hunt) is done; `docs/adr/README.md` tracks the milestones.
 
 ## Commands
 
@@ -16,11 +16,14 @@ page's videos and images to the app. Stage: M0 (scaffold) is done; `docs/adr/REA
 |---|---|
 | `start-dev.bat` | Opens the app with hot reload (`pnpm tauri dev`), installing packages on the first run |
 | `build.bat` | Builds the portable `release\Scrappy.exe` |
+| `git tag vX.Y.Z` + push the tag | Builds the installers on GitHub into a draft release (`.github/workflows/release.yml`) |
 | `pnpm dev` | The window alone in a browser, on fake data (port 4430) |
 | `pnpm check` | Size and boundary checks, tsc (app and extension), Biome, Vitest, `cargo test`, clippy. Must pass before a task is done |
-| `pnpm types` | Regenerates `src/lib/types/` from the Rust types (ts-rs) |
+| `cargo test -p scrappy-core -- --ignored` | Downloads every pinned tool from GitHub (about 300 MB): run it after changing a pin |
+| `pnpm types` | Regenerates `src/lib/types/` and `extension/lib/types/` from the Rust types (ts-rs) |
 | `pnpm format` | Biome format and fix |
 | `pnpm -C extension build` / `build:firefox` | Builds the extension into `extension/.output/` |
+| `pnpm register-host` | Registers the debug scrappy-host with Chrome, Brave, Edge, Chromium and Firefox (`--remove` undoes it); the app does it from Settings → Browser extension |
 
 Rust builds put their intermediate files in the workspace's `_cache/`; the final binaries land in `target/`.
 
@@ -30,11 +33,11 @@ Rust builds put their intermediate files in the workspace's `_cache/`; the final
 |---|---|
 | `crates/scrappy-core/` | All logic, one module per system. Never uses Tauri |
 | `crates/scrappy-host/` | The native-messaging relay the browser starts |
-| `src-tauri/` | The Tauri shell: setup, `commands/<area>.rs`, capabilities |
+| `src-tauri/` | The Tauri shell: setup, `window.rs` (the frameless window), `events.rs` (job events), `commands/<area>.rs`, capabilities |
 | `src/` | The window: `app/` (header and view list), `features/<view>/`, `lib/backend.ts`, `lib/types/` (generated) |
-| `extension/` | The WXT browser extension (one popup) |
+| `extension/` | The WXT browser extension: a background script and one popup; `lib/types/` is generated |
 | `docs/adr/` | Architecture overview, decisions and milestone tracker |
-| `scripts/` | `check-size.mjs`, `check-boundaries.mjs` |
+| `scripts/` | `check-size.mjs`, `check-boundaries.mjs`, `register-host.mjs` |
 
 ## Architecture
 
@@ -53,7 +56,10 @@ Rust sends. Read `docs/adr/README.md` first.
 
 ## Rules
 
+- UI text is short and plain, with no flavor text: `.claude/rules/ui-text.md`.
 - iro-ui comes from a release tag (`github:nyaridev/iro-ui#vX.Y.Z`), never a path or a branch.
-- `src/lib/types/` is generated: change the Rust type and run `pnpm types`.
+- `src/lib/types/` and `extension/lib/types/` are generated: change the Rust type and run `pnpm types`.
+- The window is frameless (ADR-0011). If the custom title bar misbehaves on a machine, turn on Settings → "Use the
+  system title bar".
 - The external tools (yt-dlp, Deno, gallery-dl, ffmpeg) are never committed; `scrappy-core::tools` downloads them.
 - Never commit cookies, cookies.txt files, logs or a test library folder.

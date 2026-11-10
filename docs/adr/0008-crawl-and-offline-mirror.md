@@ -29,3 +29,30 @@ for a whole-site offline copy.
 - **Harder:** the link rewrite is ours to maintain, and dynamic sites mirror only as well as their HTML allows.
 - **Later:** a new crawl target (PDFs, audio) is a filter on the same crawler.
 - **Rules:** `.claude/rules/architecture/core.md`.
+
+## Implementation notes (M11)
+
+- `spider` 2.53 with its default features off (no SQL cache, no io_uring), on the same `reqwest` 0.13 as the rest of
+  core. Same site only, `robots.txt` respected, Scrappy's own user agent; depth, pages, files, delay and a smallest
+  size are fields of `CrawlRequest`, kept in range in core.
+- Each page's file links come from `crawl/links.rs` (`lol_html`): `img` (with lazy `data-src` and `srcset`),
+  `source`, `video` and its poster, `audio`, anchors to files, `og:image` and inline `url()`. `grab`'s classifier keeps
+  the wanted kinds.
+- Files are saved four at a time through `media` (`Downloads::save_now`) into `Images/<domain>/`, inside the crawl's
+  one job: it reports files saved of the limit, with the pages visited as its message. Links the catalog already has
+  are skipped; a file under the smallest size isn't kept.
+
+## Implementation notes (M12)
+
+- One crawler, three modes (`CrawlMode`): files, mirror and page. `crawl/request.rs` checks the request and starts
+  the job; `files.rs`, `mirror.rs` and `page.rs` each run one mode.
+- A mirror saves each page the crawler visits into `Sites/<domain>/`, and fetches the stylesheets, scripts, icons,
+  images and media it uses (four at a time, within the file limit), plus what the stylesheets use (`url()`,
+  `@import`). `crawl/local.rs` maps each address to one path: `/a/b` → `a/b/index.html`, other hosts under
+  `_hosts/<host>/`, a query as a short hash in the name. Encoded `..` can't leave the folder.
+- When the crawl ends, `crawl/rewrite.rs` (`lol_html`) points every saved page's and stylesheet's links at the copies
+  by relative path; links to anything not saved stay absolute. `<base>` and the `integrity` of rewritten links are
+  dropped, and the page's declared charset becomes UTF-8 (pages are saved as UTF-8).
+- "Save page" is `monolith` 2.12 (default features off) in a blocking task, into `Sites/<domain>/_pages/<path>.html`.
+- A mirror or saved page is one `site` row in the catalog (its start page and size), so Home and the Gallery count
+  it; the Scrape view opens it in the browser when it's done.

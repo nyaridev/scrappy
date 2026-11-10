@@ -1,6 +1,7 @@
 # ADR-0009: Hunt: source packs, query detection and duplicate removal
 
-**Status:** Accepted
+**Status:** Partly superseded by [ADR-0013](0013-hunt-web-search-and-content-images.md): its sources and query
+detection. Duplicate removal still holds.
 **Date:** 2026-11-10
 
 ## Context
@@ -39,3 +40,15 @@ have no usable image API, Brave Search has no free tier, and Getty is hostile to
 - **Harder:** scraped engines will break and need fixes, and the thresholds need tuning on real sets.
 - **Later:** a new source kind is one module in `hunt/sources/`; video dedupe can reuse the hashing on frames.
 - **Rules:** `.claude/rules/architecture/core.md`.
+
+## Implementation notes (M10)
+
+- The hash is a 64-bit DCT hash compared with the median (`HashAlg::Median` with `preproc_dct`): with the mean, the
+  first coefficient outweighs the rest and nearly every bit comes out 0, so every picture matches.
+- Strict, normal and loose allow 3, 6 and 10 differing bits; pictures whose shapes differ by more than 3% never
+  match. Formats rank PNG, TIFF and BMP first, then WebP, JPEG and GIF; a JPEG's quality is estimated from its
+  luminance table.
+- Duplicate removal looks at the pictures in the catalog. Each hash, width and height is kept with the catalog row
+  (migration 3) and is made again when the row is replaced by a new download.
+- A scan is a job that reports pictures done of the total; the window takes the groups when it ends. The copies moved
+  to the system trash leave the catalog. It lives in the Gallery ("Duplicates"), not a view of its own.

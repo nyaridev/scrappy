@@ -6,8 +6,35 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = "0.23"
+chacha20poly1305 = "0.10"
+chromiumoxide = { version = "0.9.1", default-features = false }
+futures-util = "0.3.34"
+html5ever = "0.39"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff"] }
+image_hasher = "3.1.1"
+interprocess = { version = "2.4.8", features = ["tokio"] }
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
+liblzma = "0.4.9"
+lol_html = "2.9"
+markup5ever_rcdom = "0.39"
+monolith = { version = "2.12.0", default-features = false }
 regex = "1.13.1"
+reqwest = "0.13"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10"
+spider = { version = "2.53.9", default-features = false, features = ["sync"] }
+tar = "0.4.46"
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["process", "fs", "io-util", "rt", "rt-multi-thread", "time", "macros", "sync"] }
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+trash = "5.3.0"
 ts-rs = "12.0.1"
+zip = { version = "9.5.0", default-features = false, features = ["deflate"] }
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56.0"

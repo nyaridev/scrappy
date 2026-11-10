@@ -1,0 +1,4 @@
+# People: the whole web, plus encyclopedias and photo archives.
+name = "People"
+web = true
+sites = ["wikipedia.org", "commons.wikimedia.org", "flickr.com"]

@@ -16,10 +16,10 @@ container, optional ffmpeg encode), shipped as defaults and editable in Settings
 
 | Preset | What |
 |---|---|
-| Editor-safe MP4 (default) | H.264 + AAC in MP4 (yt-dlp's `-t mp4`). Sources above 1080p or not in H.264 are re-encoded with `libx264 -crf 18`, or the GPU encoder when there is one (NVENC, QSV, AMF, VideoToolbox) |
-| Original | The best streams, no re-encode, in MKV |
-| HEVC MP4 | H.265 with the `hvc1` tag: 4K that stays small |
-| Editing intermediate | ProRes 422 or DNxHR HQ in MOV with PCM audio (the choice for Resolve on Linux) |
+| MP4 (H.264) (default) | H.264 + AAC in MP4 (yt-dlp's `-t mp4`). Sources above 1080p or not in H.264 are re-encoded with `libx264 -crf 18`, or the GPU encoder when there is one (NVENC, QSV, AMF, VideoToolbox) |
+| MKV (original) | The best streams, no re-encode, in MKV |
+| MP4 (HEVC) | H.265 with the `hvc1` tag: 4K that stays small |
+| MOV (ProRes) | ProRes 422 or DNxHR HQ in MOV with PCM audio (the choice for Resolve on Linux) |
 | Audio | MP3 320 (default), AAC, FLAC or WAV. Opus is kept only as "original, not editor-safe" |
 
 After each download ffprobe reads the result, and the UI shows its codec and container.

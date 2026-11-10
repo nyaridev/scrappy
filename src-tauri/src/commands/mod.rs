@@ -2,3 +2,13 @@
 //! and returns the result.
 
 pub mod app;
+pub mod dedupe;
+pub mod extension;
+pub mod grab;
+pub mod hunt;
+pub mod jobs;
+pub mod library;
+pub mod media;
+pub mod scrape;
+pub mod settings;
+pub mod tools;

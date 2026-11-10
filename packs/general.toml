@@ -1,0 +1,4 @@
+# General: the whole web, for any topic.
+name = "General"
+web = true
+sites = []

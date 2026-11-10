@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: Tauri's core defaults only. No fs, shell, http or opener plugins: Rust does that work (ADR-0005).",
+  "description": "The main window: Tauri's core defaults, plus moving and closing itself for the custom title bar (ADR-0011). No fs, shell, http or opener plugins: Rust does that work (ADR-0005).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
+  ]
 }

@@ -26,6 +26,13 @@ static SECRET_PARAMS: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 
+/// A line of a Netscape cookies file (domain, flags, path, secure, expiry, name, value, tab-separated): the name and
+/// value are hidden.
+static COOKIE_LINES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^([^\t\r\n]+\t(?:TRUE|FALSE)\t[^\t\r\n]*\t(?:TRUE|FALSE)\t-?\d+)\t[^\r\n]*")
+        .expect("valid regex")
+});
+
 static EMAILS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").expect("valid regex"));
 
@@ -56,10 +63,12 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for RedactingMakeWriter<M> {
 }
 
 // ── Public API ────────────────────────────
-/// Returns `text` with cookies, auth headers, secret parameters and email addresses replaced by `[redacted]`.
+/// Returns `text` with cookies (headers and cookie-file lines), auth headers, secret parameters and email addresses
+/// replaced by `[redacted]`.
 pub fn redact(text: &str) -> String {
     let text = SECRET_HEADERS.replace_all(text, format!("${{1}}${{2}}{HIDDEN}"));
     let text = SECRET_PARAMS.replace_all(&text, format!("${{1}}={HIDDEN}"));
+    let text = COOKIE_LINES.replace_all(&text, format!("${{1}}\t{HIDDEN}"));
     EMAILS.replace_all(&text, HIDDEN).into_owned()
 }
 
@@ -97,6 +106,32 @@ mod tests {
             redact("https://cdn.example/v.m3u8?token=abc123&quality=hd&sig=ff00"),
             "https://cdn.example/v.m3u8?token=[redacted]&quality=hd&sig=[redacted]"
         );
+    }
+
+    #[test]
+    fn hides_cookie_file_lines() {
+        let file = "# Netscape HTTP Cookie File\n\
+                    .youtube.com\tTRUE\t/\tTRUE\t1900000000\tSID\tsecret\n\
+                    #HttpOnly_x.com\tFALSE\t/\tTRUE\t0\tauth_token\tabc123\n";
+        let hidden = redact(file);
+        assert!(!hidden.contains("secret") && !hidden.contains("abc123") && !hidden.contains("auth_token"));
+        assert!(hidden.contains(".youtube.com\tTRUE\t/\tTRUE\t1900000000\t[redacted]\n"));
+        assert!(hidden.contains("#HttpOnly_x.com\tFALSE\t/\tTRUE\t0\t[redacted]\n"));
+    }
+
+    #[test]
+    fn hides_a_cookie_even_through_debug() {
+        let cookie = crate::vault::Cookie {
+            domain: ".x.com".into(),
+            name: "auth_token".into(),
+            value: "abc123".into(),
+            path: "/".into(),
+            secure: true,
+            http_only: true,
+            host_only: false,
+            expires: None,
+        };
+        assert!(!redact(&format!("{cookie:?}")).contains("abc123"));
     }
 
     #[test]

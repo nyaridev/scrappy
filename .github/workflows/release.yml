@@ -1,0 +1,83 @@
+# Release: on a version tag, builds the installers and the portable Windows zip into a draft GitHub release, and
+# attaches the extension's zips (ADR-0014). Push a tag like v0.2.0 to run it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --bundles nsis
+          - os: macos-latest
+            args: --target universal-apple-darwin --bundles app,dmg
+          - os: ubuntu-22.04
+            args: --bundles appimage,deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libxdo-dev patchelf file pkg-config
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Scrappy ${{ github.ref_name }}
+          releaseDraft: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+      - name: Portable Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory portable | Out-Null
+          Copy-Item target/release/scrappy.exe portable/Scrappy.exe
+          Copy-Item src-tauri/binaries/scrappy-host-x86_64-pc-windows-msvc.exe portable/scrappy-host.exe
+          $zip = "Scrappy_${{ github.ref_name }}_windows_portable.zip"
+          Compress-Archive -Path portable/* -DestinationPath $zip
+          gh release upload "${{ github.ref_name }}" $zip --clobber
+
+  extension:
+    needs: app
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C extension zip
+      - run: pnpm -C extension zip:firefox
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" extension/.output/*.zip --clobber

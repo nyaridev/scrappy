@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "pnpm build && node scripts/stage-host.mjs"
+  },
+  "bundle": {
+    "active": true,
+    "externalBin": ["binaries/scrappy-host"],
+    "category": "Utility",
+    "shortDescription": "Downloads videos and images from any site.",
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    }
+  }
+}

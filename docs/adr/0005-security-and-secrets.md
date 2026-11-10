@@ -1,6 +1,6 @@
 # ADR-0005: Security and secrets
 
-**Status:** Accepted
+**Status:** Accepted; the window's capability is widened by ADR-0011 (window-control permissions)
 **Date:** 2026-11-10
 
 ## Context
@@ -11,7 +11,8 @@ database, so reading cookies straight from a browser profile is unreliable on Wi
 
 ## Decision
 
-- **The window has no reach.** Its capability grants Tauri's core defaults only: no fs, shell, http or opener plugin.
+- **The window has no reach.** Its capability grants Tauri's core defaults, plus moving and closing its own window
+  (ADR-0011): no fs, shell, http or opener plugin.
   The CSP is strict (`default-src 'self'`, no remote scripts or frames), and the window never loads a remote page.
 - **Every input is checked in Rust.** URLs must be http or https. Output paths are resolved and must stay inside the
   library root. Messages from the extension are checked for size and shape (`bridge`).
@@ -24,6 +25,23 @@ database, so reading cookies straight from a browser profile is unreliable on Wi
   `[redacted]`. yt-dlp's verbose output is never logged.
 - **No telemetry and no accounts.** Requests to search sources use a generic User-Agent.
 - **Downloaded tools are checked** against pinned SHA256 sums (ADR-0002).
+
+## Implementation notes (M6)
+
+- A sign-in belongs to a **site**, the link's registrable domain (`www.youtube.com` → `youtube.com`), with a few
+  aliases (`youtu.be` → `youtube.com`, `twitter.com` → `x.com`). The app checks that every cookie it gets belongs
+  to the site of the link being sent; the extension can't pick another site.
+- The flow: a send fails with a sign-in wall (yt-dlp's error reads like one) → the app replies `needsCookies` →
+  the popup asks → the extension reads that site's cookies and sends them with the retry. A failure after
+  cookies were given is an error, not another ask. A remembered sign-in is used for that site from then on, by
+  the window too; a stale one leads to a new ask, and the new cookies replace it.
+- The vault file is `<app data>/vault.bin`; its key is created and stored in the keychain on the first
+  "Remember", so nothing touches the keychain before that. If the key is gone from the keychain, the remembered
+  sign-ins are lost and the next "Remember" starts a new vault.
+- The temporary cookies file is created in the user's temp folder (owner-only on Unix; the folder is private on
+  Windows) and deleted when the run ends. Files a crash left behind are removed at the next start.
+- `Cookie`'s `Debug` hides the value, and the log redacts cookie-file lines.
+- Images the extension sends don't use sign-ins yet.
 
 ## Options considered
 
