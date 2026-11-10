@@ -100,7 +100,8 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 - Linux builds need the Secret Service (`libdbus`) for the vault's key; the workflows install it.
 - Releases are unsigned: Windows SmartScreen and macOS Gatekeeper warn on first start (macOS: right-click → Open).
   Signing and notarizing need certificates (ADR-0014, Later).
-- The workflows are untested until the repo is on GitHub (M14 step 5).
+- The Check workflow passes on Windows, macOS and Linux; the release workflow runs on the first `v*` tag (M14
+  step 5).
 - A real sign-in flow (send → ask → share → download) is tested by its parts; try it once with a signed-in site
   in Chrome and Firefox.
 - Collections are tested for real on a YouTube playlist and a Bluesky profile (the ignored test in
