@@ -1,0 +1,17 @@
+[package]
+name = "scrappy"
+description = "Scrappy desktop app: the Tauri shell around scrappy-core"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+name = "scrappy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+scrappy-core = { workspace = true }
+tauri = { version = "2", features = [] }

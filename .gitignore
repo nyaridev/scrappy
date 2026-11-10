@@ -1,0 +1,24 @@
+# Dependencies and builds
+node_modules/
+dist/
+target/
+/release/
+extension/.output/
+extension/.wxt/
+src-tauri/gen/schemas/
+src-tauri/icons/android/
+src-tauri/icons/ios/
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+CLAUDE.local.md
+.claude/settings.local.json
+
+# OS and editor noise
+Thumbs.db
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json

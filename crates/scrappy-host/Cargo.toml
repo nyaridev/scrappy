@@ -1,0 +1,8 @@
+[package]
+name = "scrappy-host"
+description = "Native-messaging host the browser launches: relays the extension's messages to the Scrappy app."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]

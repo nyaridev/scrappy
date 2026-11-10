@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: Tauri's core defaults only. No fs, shell, http or opener plugins: Rust does that work (ADR-0005).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

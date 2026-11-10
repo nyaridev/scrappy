@@ -1,0 +1,36 @@
+{
+  "name": "scrappy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "tauri": "tauri",
+    "types": "cargo test -p scrappy-core export_bindings",
+    "check": "node scripts/check-size.mjs && node scripts/check-boundaries.mjs && tsc && pnpm -C extension compile && biome check . && vitest run --passWithNoTests && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
+    "format": "biome check --write .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "iro-ui": "github:nyaridev/iro-ui#v1.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^5.1.0"
+  },
+  "description": "Downloads videos from YouTube, X, Instagram and any site, grabs media from pages, crawls and scrapes images, and keeps a gallery.",
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

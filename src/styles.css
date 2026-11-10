@@ -1,0 +1,45 @@
+/* App layout: the header over the selected view. Only iro-ui tokens, never raw values. */
+
+body {
+  margin: 0;
+}
+
+.root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Three columns: the name, the tabs centered in the window, the settings button. */
+.header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: var(--iro-space-4);
+  align-items: center;
+  padding: var(--iro-space-2) var(--iro-space-4);
+  background: var(--iro-surface);
+  border-bottom: 1px solid var(--iro-line);
+}
+
+.brand {
+  font-family: var(--iro-font-display);
+  font-size: var(--iro-text-lg);
+  font-weight: 700;
+}
+
+.header-end {
+  justify-self: end;
+}
+
+.view {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  padding: var(--iro-space-6);
+  overflow: auto;
+}
