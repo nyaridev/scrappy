@@ -17,6 +17,7 @@ import type { AppInfo } from "./types/AppInfo";
 import type { CrawlRequest } from "./types/CrawlRequest";
 import type { CrawlStarted } from "./types/CrawlStarted";
 import type { DownloadEntry } from "./types/DownloadEntry";
+import type { DownloadLimits } from "./types/DownloadLimits";
 import type { DownloadRequest } from "./types/DownloadRequest";
 import type { DuplicateRequest } from "./types/DuplicateRequest";
 import type { FolderCheck } from "./types/FolderCheck";
@@ -61,6 +62,7 @@ let fakeLibrary: LibraryStatus =
 let fakeSettings: Settings = {
   libraryRoot: fakeLibrary.state === "notSet" ? null : fakeLibrary.root,
   look: { nativeFrame: fakeFrame === "native", liquidBackground: true },
+  downloads: { atOnce: 10, speedLimit: 0 },
 };
 
 /** Rust's answers, roughly: rejects with a plain message, as `invoke` does. */
@@ -116,6 +118,7 @@ let fakeDownloads: DownloadEntry[] = flags.has("empty")
         title: "An older download",
         state: "done",
         file: "Videos/someone/An older download [dQw4w9WgXcQ].mp4",
+        size: 48_300_000,
         error: null,
       },
       {
@@ -125,6 +128,7 @@ let fakeDownloads: DownloadEntry[] = flags.has("empty")
         title: "A failed one",
         state: "failed",
         file: null,
+        size: null,
         error: "Download failed: connection reset",
       },
     ];
@@ -495,6 +499,16 @@ export async function entryThumbnail(url: string): Promise<string | null> {
   )}`;
 }
 
+/** The size a probed video will download with a preset and height, in bytes; `null` when it isn't known (a
+ * playlist, a profile, or a site that doesn't say). */
+export async function downloadSize(url: string, preset: string, maxHeight: number | null): Promise<number | null> {
+  if (inTauri) return invoke("download_size", { url, preset, maxHeight });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  if (fakeLinkKind(url) !== "video") return null;
+  if (fakePresets.find((p) => p.id === preset)?.audio) return 4_600_000;
+  return Math.round(9_000_000 * ((maxHeight ?? 1080) / 240) ** 1.6);
+}
+
 /** The output presets, the default first. */
 export async function presets(): Promise<PresetInfo[]> {
   return inTauri ? invoke("presets") : fakePresets;
@@ -527,16 +541,18 @@ function fakeStart(request: DownloadRequest): DownloadEntry {
     file: null,
     files: null,
     skipped: null,
+    size: null,
     error: null,
   };
   const saved = {
-    video: { file: "Videos/jawed/Me at the zoo [jNQXAC9IVRw].mp4", files: null, skipped: null },
+    video: { file: "Videos/jawed/Me at the zoo [jNQXAC9IVRw].mp4", files: null, skipped: null, size: 30_000_000 },
     playlist: {
       file: "Videos/Tech With Tim/Pygame Programming Tutorials",
       files: (request.limit ?? 40) - 2,
       skipped: 2,
+      size: ((request.limit ?? 40) - 2) * 85_000_000,
     },
-    profile: { file: "Social/bluesky/bsky.app", files: request.limit ?? 50, skipped: 0 },
+    profile: { file: "Social/bluesky/bsky.app", files: request.limit ?? 50, skipped: 0, size: 61_000_000 },
   }[kind];
   const total = kind === "video" ? 30_000_000 : (request.limit ?? (kind === "playlist" ? 40 : 50));
   fakeDownloads = [...fakeDownloads, entry];
@@ -602,12 +618,13 @@ export async function grabFinds(request: GrabRequest): Promise<Picked[]> {
       file: null,
       files: null,
       skipped: null,
+      size: null,
       error: null,
     };
     fakeDownloads = [...fakeDownloads, entry];
     fakeJob(id, 12_000_000, () => {
       const file = `Grabs/example.com/2026-11-10/${pick.name}`;
-      fakeDownloads = fakeDownloads.map((d) => (d.id === id ? { ...d, state: "done", file } : d));
+      fakeDownloads = fakeDownloads.map((d) => (d.id === id ? { ...d, state: "done", file, size: 12_000_000 } : d));
     });
     return { url: pick.url, id, error: null };
   });
@@ -820,6 +837,14 @@ export async function getSettings(): Promise<Settings> {
 export async function setLook(look: Look): Promise<Settings> {
   if (inTauri) return invoke("set_look", { look });
   fakeSettings = { ...fakeSettings, look };
+  return fakeSettings;
+}
+
+/** Saves how downloads run (Rust brings it into range) and returns the settings. */
+export async function setDownloadLimits(limits: DownloadLimits): Promise<Settings> {
+  if (inTauri) return invoke("set_download_limits", { limits });
+  const atOnce = Math.min(20, Math.max(1, Math.round(limits.atOnce)));
+  fakeSettings = { ...fakeSettings, downloads: { atOnce, speedLimit: Math.max(0, limits.speedLimit) } };
   return fakeSettings;
 }
 

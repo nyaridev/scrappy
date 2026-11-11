@@ -1,12 +1,13 @@
 // DownloadView: paste a link, Rust checks it (Enter or the arrow) and shows what's there until the next check; pick
 // a preset and quality (for a playlist or profile, how many; for a playlist or channel, which lists and videos),
-// download. The kept downloads are listed below, with Clear all.
+// download. A single video shows the size it will download. The kept downloads are listed below, with Clear all.
 
 import { Button, Field, Icon, IconButton, Panel, Select, TextField } from "iro-ui";
 import { ArrowRightIcon, DownloadIcon, LinkIcon } from "iro-ui/icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCached } from "../../app/useCached";
-import { presets, probeUrl } from "../../lib/backend";
+import { downloadSize, presets, probeUrl } from "../../lib/backend";
+import { formatBytes } from "../../lib/format";
 import type { Probe } from "../../lib/types/Probe";
 import type { Section } from "../../lib/types/Section";
 import { DownloadQueue } from "./DownloadQueue";
@@ -45,9 +46,11 @@ export function DownloadView() {
   const [starting, setStarting] = useState(false);
   const [sections, setSections] = useState<string[]>([]);
   const [skip, setSkip] = useState<string[]>([]);
+  const [size, setSize] = useState<number | null>(null);
   const { entries, progress, start, cancel, remove, clear } = useDownloads();
 
   const preset = allPresets?.find((p) => p.id === presetId) ?? allPresets?.[0] ?? null;
+  const maxHeight = quality === BEST || preset?.audio ? null : Number(quality);
   const qualityOptions = [
     { value: BEST, label: "Best" },
     ...(probe?.heights ?? []).map((height) => ({ value: String(height), label: `${height}p` })),
@@ -70,6 +73,19 @@ export function DownloadView() {
           ...AMOUNTS.filter((n) => more || n < count).map((n) => ({ value: String(n), label: `First ${n}` })),
         ];
   const downloadLabel = count == null ? "Download" : amount === ALL ? "Download all" : `Download ${amount}`;
+
+  // Only a single video has a size before it downloads: playlist and profile listings carry none.
+  useEffect(() => {
+    setSize(null);
+    if (!probe || probe.count != null || probe.files || !preset) return;
+    let current = true;
+    void downloadSize(probe.url, preset.id, maxHeight)
+      .catch(() => null)
+      .then((bytes) => current && setSize(bytes));
+    return () => {
+      current = false;
+    };
+  }, [probe, preset, maxHeight]);
 
   async function check() {
     const url = link.trim();
@@ -100,7 +116,7 @@ export function DownloadView() {
       await start({
         url: probe.url,
         preset: preset.id,
-        maxHeight: quality === BEST ? null : Number(quality),
+        maxHeight,
         limit: amount === ALL ? null : Number(amount),
         sections: hasSections ? sections : [],
         skip,
@@ -178,6 +194,7 @@ export function DownloadView() {
               )}
             </div>
             <div className="download-actions">
+              {size != null && <span className="download-size">About {formatBytes(size)}</span>}
               <Button
                 variant="primary"
                 icon={<Icon icon={DownloadIcon} />}

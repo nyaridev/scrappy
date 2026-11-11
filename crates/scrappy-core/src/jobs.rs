@@ -4,12 +4,12 @@
 // ── Imports ───────────────────────────────
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use ts_rs::TS;
 
 // ── Constants ─────────────────────────────
@@ -90,9 +90,12 @@ pub struct Jobs {
     report: Reporter,
 }
 
-/// A limit on how many jobs of one kind run at once; the rest wait in order.
+/// A limit on how many jobs (or parts of jobs) of one kind run at once; the rest wait in order. Clones share it.
 #[derive(Clone)]
-pub struct Queue(Arc<Semaphore>);
+pub struct Queue {
+    slots: Arc<Semaphore>,
+    size: Arc<AtomicUsize>,
+}
 
 /// A running job's handle: its id, whether it was cancelled, and a way to report progress.
 #[derive(Clone)]
@@ -154,15 +157,10 @@ impl Jobs {
         F: FnOnce(Job) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), String>> + Send + 'static,
     {
-        let slots = queue.0.clone();
+        let queue = queue.clone();
         self.start(move |job| async move {
             job.progress(JobPhase::Queued, 0, None);
-            let _slot = loop {
-                tokio::select! {
-                    slot = slots.clone().acquire_owned() => break slot.map_err(|_| "The queue was closed.")?,
-                    () = tokio::time::sleep(QUEUE_CHECK) => if job.cancelled() { return Err("Cancelled.".into()) },
-                }
-            };
+            let _slot = queue.slot(&job).await?;
             work(job).await
         })
     }
@@ -177,7 +175,43 @@ impl Jobs {
 impl Queue {
     /// A queue running at most `limit` jobs at once.
     pub fn new(limit: usize) -> Self {
-        Self(Arc::new(Semaphore::new(limit)))
+        Self { slots: Arc::new(Semaphore::new(limit)), size: Arc::new(AtomicUsize::new(limit)) }
+    }
+
+    /// How many run at once.
+    pub fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed)
+    }
+
+    /// Runs `limit` at once from now on: more start at once, fewer as running ones finish. Must be called inside a
+    /// Tokio runtime.
+    pub fn resize(&self, limit: usize) {
+        let old = self.size.swap(limit, Ordering::Relaxed);
+        if limit > old {
+            self.slots.add_permits(limit - old);
+        } else if let Ok(extra) = u32::try_from(old - limit)
+            && extra > 0
+        {
+            let slots = self.slots.clone();
+            tokio::spawn(async move {
+                if let Ok(taken) = slots.acquire_many_owned(extra).await {
+                    taken.forget();
+                }
+            });
+        }
+    }
+
+    /// Waits for a free slot, which frees again when it's dropped. Fails when `job` is stopped while it waits.
+    pub async fn slot(&self, job: &Job) -> Result<OwnedSemaphorePermit, String> {
+        // One wait, kept across checks: a new one would go to the back of the line.
+        let wait = self.slots.clone().acquire_owned();
+        tokio::pin!(wait);
+        loop {
+            tokio::select! {
+                slot = &mut wait => return slot.map_err(|_| "The queue was closed.".to_string()),
+                () = tokio::time::sleep(QUEUE_CHECK) => if job.cancelled() { return Err("Cancelled.".into()) },
+            }
+        }
     }
 }
 
@@ -281,6 +315,34 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(most.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_queue_grows_and_shrinks() {
+        let queue = super::Queue::new(1);
+        queue.resize(3);
+        let job = test_job();
+        let slots: Vec<_> = futures_util::future::join_all((0..3).map(|_| queue.slot(&job))).await;
+        assert!(slots.iter().all(Result::is_ok));
+        queue.resize(1);
+        drop(slots);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let first = queue.slot(&job).await.unwrap();
+        let second = tokio::time::timeout(Duration::from_millis(50), queue.slot(&job)).await;
+        assert!(second.is_err(), "only one slot is left");
+        drop(first);
+        assert_eq!(queue.size(), 1);
+    }
+
+    /// A job handle with nowhere to report.
+    fn test_job() -> super::Job {
+        super::Job {
+            id: 0,
+            cancelled: Arc::default(),
+            report: Arc::new(|_| {}),
+            started: std::time::Instant::now(),
+            last_report: Arc::default(),
+        }
     }
 
     #[tokio::test]

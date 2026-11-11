@@ -22,11 +22,13 @@ function stateOf(entry: DownloadEntry, progress: JobProgress | undefined): Downl
   return entry.state === "queued" && progress && progress.phase !== "queued" ? "running" : entry.state;
 }
 
-/** What a finished playlist or profile saved: `12 files · 3 already saved · Social/bluesky/bsky.app`. */
+/** What a finished download saved: `48.3 MB · Videos/…`, or for a playlist or profile
+ * `12 files · 1.2 GB · 3 already saved · Social/bluesky/bsky.app`. */
 function savedText(entry: DownloadEntry): string {
-  if (entry.files == null) return entry.file ?? "Done";
-  const parts = [formatCount(entry.files, "file"), entry.skipped ? `${entry.skipped} already saved` : null, entry.file];
-  return parts.filter(Boolean).join(" · ");
+  const size = entry.size ? formatBytes(entry.size) : null;
+  if (entry.files == null) return [size, entry.file ?? "Done"].filter(Boolean).join(" · ");
+  const skipped = entry.skipped ? `${entry.skipped} already saved` : null;
+  return [formatCount(entry.files, "file"), size, skipped, entry.file].filter(Boolean).join(" · ");
 }
 
 function detail(entry: DownloadEntry, progress: JobProgress | undefined): string {
@@ -66,6 +68,7 @@ function sameEntry(a: DownloadEntry, b: DownloadEntry): boolean {
     a.file === b.file &&
     a.files === b.files &&
     a.skipped === b.skipped &&
+    a.size === b.size &&
     a.error === b.error
   );
 }

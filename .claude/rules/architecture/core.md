@@ -16,7 +16,7 @@ results, and reports progress through a callback the shell passes in.
 | `library` | the root folder, its layout, path templates, the catalog (`.scrappy/library.db`) and what it says was downloaded | 0004 |
 | `jobs` | the queue, cancel flags, concurrency, progress callbacks | 0010 |
 | `tools` | finding, downloading, checking and updating yt-dlp, Deno, gallery-dl, ffmpeg, ffprobe; finding the installed browser | 0002, 0012 |
-| `media` | probing and downloading with yt-dlp and gallery-dl, encoding with ffmpeg, presets, the Gallery's thumbnails, the Download list (`downloads.db`) | 0002, 0003, 0016 |
+| `media` | probing and downloading with yt-dlp and gallery-dl, encoding with ffmpeg, presets, the Gallery's thumbnails, the Download list (`downloads.db`), download slots and the speed limit | 0002, 0003, 0016, 0017 |
 | `grab` | finding a page's media (extension finds, CDP deep scan), classifying, the handed-page inbox, saving picks through `media` | 0007 |
 | `crawl` | crawling with limits, offline mirrors, single-page saves | 0008 |
 | `hunt` | source packs, the web search, the content-image finder, saving what it finds | 0013 |
@@ -35,7 +35,9 @@ results, and reports progress through a callback the shell passes in.
 ## How to add a system
 
 1. Write `crates/scrappy-core/src/<name>.rs` (header first), and add `pub mod <name>;` to `lib.rs`.
-2. Long work runs as a job (`jobs`), never by blocking a command.
+2. Long work runs as a job (`jobs`), never by blocking a command. A download that shows in the Download list takes
+   a slot from `Downloads`' queue (a playlist, one per video), so "Downloads at once" holds for all of them
+   (ADR-0017); crawls and hunts fetch inside their own job.
 3. Types the window sees derive `Serialize`, `ts_rs::TS` with `#[ts(export)]` and `#[serde(rename_all = "camelCase")]`.
 4. Add a row to the table above, and to `docs/adr/README.md` if it changes the module table there.
 

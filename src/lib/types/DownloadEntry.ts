@@ -24,4 +24,8 @@ files: number | null,
 /**
  * For a playlist or profile: the files skipped because they were saved before.
  */
-skipped: number | null, error: string | null, };
+skipped: number | null, 
+/**
+ * Bytes on disk of what it saved; `None` until it's done, and for rows kept from before sizes were.
+ */
+size: number | null, error: string | null, };

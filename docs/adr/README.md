@@ -50,6 +50,7 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 | [0014](0014-builds-installers-and-host-registration.md) | Builds, installers and connecting the browsers | Accepted |
 | [0015](0015-gallery-from-the-library-folder.md) | The Gallery shows the library folder, watched live | Accepted |
 | [0016](0016-download-history-and-channel-sections.md) | The Download list is kept; a channel's lists are picked one by one | Accepted |
+| [0017](0017-download-sizes-parallel-downloads-and-speed-limit.md) | Sizes before and after, ten downloads at once, a speed limit per download | Accepted |
 
 ## Milestones
 
@@ -95,6 +96,8 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 - GPU encoders (NVENC, QSV, AMF, VideoToolbox) for the editor-safe re-encode (ADR-0003), after M3's `libx264`.
 - Downloads: a Retry button for failed ones; YouTube sometimes answers 403 mid-download, which a retry fixes.
 - The Download list is kept in `downloads.db` (ADR-0016); gallery-dl profiles don't offer sections yet.
+- The speed limit caps each download, not the total (ADR-0017): a total cap needs a local proxy the tools download
+  through. Playlists, channels and profiles show no size before they download.
 - Images sent from the extension don't use remembered sign-ins yet (M6).
 - Linux builds need the Secret Service (`libdbus`) for the vault's key; the workflows install it.
 - Releases are unsigned: Windows SmartScreen and macOS Gatekeeper warn on first start (macOS: right-click → Open).

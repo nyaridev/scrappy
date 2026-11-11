@@ -1,9 +1,10 @@
 //! Engine: the check every link goes through, the yt-dlp and gallery-dl commands every run starts from (yt-dlp with
-//! Scrappy's Deno and FFmpeg passed in), running a tool line by line until it ends or is stopped, sign-in walls, and
-//! tool errors turned into one readable line.
+//! Scrappy's Deno and FFmpeg passed in, both with the speed limit), running a tool line by line until it ends or is
+//! stopped, sign-in walls, and tool errors turned into one readable line.
 
 // ── Imports ───────────────────────────────
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use reqwest::Url;
@@ -37,7 +38,21 @@ const LOGIN_HINTS: &[&str] = &[
     "cookies needed",
 ];
 
+// ── State ─────────────────────────────────
+/// Each download's top speed in bytes per second, 0 for none: a setting for the whole app (ADR-0017).
+static SPEED_LIMIT: AtomicU64 = AtomicU64::new(0);
+
 // ── Public API ────────────────────────────
+/// Caps each download that starts from now on at `bytes` per second; `None` for no limit.
+pub fn set_speed_limit(bytes: Option<u64>) {
+    SPEED_LIMIT.store(bytes.unwrap_or(0), Ordering::Relaxed);
+}
+
+/// The speed limit in bytes per second, if there is one.
+pub(super) fn speed_limit() -> Option<u64> {
+    Some(SPEED_LIMIT.load(Ordering::Relaxed)).filter(|&bytes| bytes > 0)
+}
+
 /// The link, if it's http or https: nothing else reaches yt-dlp (ADR-0005).
 pub(super) fn check_url(input: &str) -> Result<String, String> {
     let url = Url::parse(input.trim()).map_err(|_| "Not a link.".to_string())?;
@@ -52,6 +67,9 @@ pub(super) fn yt_dlp(toolbox: &Toolbox) -> Result<Command, String> {
     let program = toolbox.locate(Tool::YtDlp).1.ok_or("yt-dlp isn't installed. Download it in Settings.")?;
     let mut command = tools::command(&program);
     command.args(["--no-colors", "--no-warnings", "--no-playlist"]);
+    if let Some(bytes) = speed_limit() {
+        command.arg("--limit-rate").arg(bytes.to_string());
+    }
     if let Some(deno) = toolbox.locate(Tool::Deno).1 {
         command.arg("--js-runtimes").arg(format!("deno:{}", deno.display()));
     }
@@ -66,6 +84,9 @@ pub(super) fn gallery_dl(toolbox: &Toolbox) -> Result<Command, String> {
     let program = toolbox.locate(Tool::GalleryDl).1.ok_or("gallery-dl isn't installed. Download it in Settings.")?;
     let mut command = tools::command(&program);
     command.arg("--config-ignore");
+    if let Some(bytes) = speed_limit() {
+        command.arg("--limit-rate").arg(bytes.to_string());
+    }
     Ok(command)
 }
 

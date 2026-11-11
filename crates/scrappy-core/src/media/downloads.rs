@@ -2,6 +2,7 @@
 //! reuses the probe instead of asking the site again), the queue downloads wait in (ADR-0010), and the sign-ins they
 //! use: one given for this download, else the site's remembered one (ADR-0005). A link becomes one video, a playlist
 //! or a gallery-dl collection, as its route and probe say; a channel's picked sections become one download each.
+//! The queue's size and the speed limit come from the settings (ADR-0017).
 
 // ── Imports ───────────────────────────────
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::download::{self, Order, Saved, Taken};
+use super::download::{self, Order, Saved, Taken, size_of};
 use super::download_list::DownloadList;
 use super::engine;
 use super::gallery::{self, GalleryOrder};
@@ -23,11 +24,11 @@ use super::probe::{self, Info, Probe};
 use super::route::{self, Engine};
 use crate::jobs::{Job, JobId, Jobs, Queue};
 use crate::library::template::{self, Fields};
+use crate::settings::DownloadLimits;
 use crate::tools::Toolbox;
 use crate::vault::{self, Cookie, CookieFile, Vault};
 
 // ── Constants ─────────────────────────────
-const RUNNING_AT_ONCE: usize = 2;
 /// The preset column for an image sent from the extension.
 const IMAGE_PRESET: &str = "Image";
 /// The preset column for a post or profile: gallery-dl saves the files as they are.
@@ -93,6 +94,9 @@ pub struct DownloadEntry {
     pub files: Option<u32>,
     /// For a playlist or profile: the files skipped because they were saved before.
     pub skipped: Option<u32>,
+    /// Bytes on disk of what it saved; `None` until it's done, and for rows kept from before sizes were.
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
     pub error: Option<String>,
 }
 
@@ -122,6 +126,9 @@ pub enum SendError {
     Failed(String),
 }
 
+/// A size estimate's link, preset id and height.
+type SizeKey = (String, &'static str, Option<u32>);
+
 /// A link's probe, kept for its download.
 #[derive(Clone)]
 struct Probed {
@@ -144,6 +151,7 @@ pub struct Downloads {
     previews: Arc<Mutex<HashMap<String, String>>>,
     pictures: Arc<Mutex<HashMap<String, Option<String>>>>,
     fetching: Arc<tokio::sync::Semaphore>,
+    sizes: Arc<Mutex<HashMap<SizeKey, Option<u64>>>>,
     taken: Taken,
 }
 
@@ -192,13 +200,14 @@ impl Downloads {
         Self {
             toolbox,
             vault,
-            queue: Queue::new(RUNNING_AT_ONCE),
+            queue: Queue::new(DownloadLimits::default().at_once as usize),
             entries: Arc::default(),
             list: DownloadList::default(),
             probed: Arc::default(),
             previews: Arc::default(),
             pictures: Arc::default(),
             fetching: Arc::new(tokio::sync::Semaphore::new(PREVIEWS_AT_ONCE)),
+            sizes: Arc::default(),
             taken: Arc::default(),
         }
     }
@@ -208,6 +217,20 @@ impl Downloads {
         self.list = DownloadList::open(dir);
         self.entries = Arc::new(Mutex::new(self.list.load()));
         self
+    }
+
+    /// Starts with `limits` (the saved settings) instead of the defaults.
+    pub fn limited(mut self, limits: &DownloadLimits) -> Self {
+        self.queue = Queue::new(limits.at_once as usize);
+        engine::set_speed_limit(limits.bytes_per_second());
+        self
+    }
+
+    /// Runs downloads with new `limits`: the queue's size at once, the speed limit for downloads that start from
+    /// now on. Must be called inside a Tokio runtime.
+    pub fn set_limits(&self, limits: &DownloadLimits) {
+        self.queue.resize(limits.at_once as usize);
+        engine::set_speed_limit(limits.bytes_per_second());
     }
 
     /// The highest id in the list, so new jobs continue after it.
@@ -220,6 +243,25 @@ impl Downloads {
         let url = engine::check_url(url)?;
         let cookies = self.remembered(&url);
         Ok(self.look_up(&url, &[], cookies.as_deref()).await.map_err(|e| e.message())?.probe)
+    }
+
+    /// The size a probed video will download with `preset` at `max_height`; `None` for a link that isn't one
+    /// probed video, or when the site doesn't say.
+    pub async fn size(&self, url: &str, preset: &str, max_height: Option<u32>) -> Result<Option<u64>, String> {
+        let url = engine::check_url(url)?;
+        let preset = presets::find(preset).ok_or("Unknown preset.")?;
+        let key = (url.clone(), preset.id, max_height.filter(|_| !preset.audio));
+        if let Some(size) = self.sizes.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return Ok(*size);
+        }
+        let kept = self.probed.lock().unwrap_or_else(PoisonError::into_inner).get(&url).cloned();
+        let Some(Probed { json, probe, .. }) = kept else { return Ok(None) };
+        if probe.files || probe.count.is_some() || json.is_empty() {
+            return Ok(None);
+        }
+        let size = download::estimate(&self.toolbox, preset, key.2, &json).await?;
+        self.sizes.lock().unwrap_or_else(PoisonError::into_inner).insert(key, size);
+        Ok(size)
     }
 
     /// The thumbnail of a video a probe listed, as a `data:` URL; `None` for a link no probe listed, or no picture.
@@ -363,7 +405,7 @@ impl Downloads {
         let (place, site) = (Some(request.folder.join(name)), request.site);
         let order = Order { root, url: url.clone(), preset, max_height: None, info_json, headers, cookies: None, taken, place, site };
         let toolbox = self.toolbox.clone();
-        Ok(self.queue(jobs, url, request.title, preset.name, None, move |job| async move {
+        Ok(self.queue(jobs, (url, request.title), preset.name, None, true, move |job| async move {
             download::run(&toolbox, order, &job).await
         }))
     }
@@ -395,23 +437,28 @@ impl Downloads {
                 (total, limit) => total.or(limit),
             };
             let order = GalleryOrder { root, url: url.clone(), limit, total, cookies };
-            return Ok(self.queue(jobs, url, title, FILES_PRESET, thumbnail, move |job| async move {
+            return Ok(self.queue(jobs, (url, title), FILES_PRESET, thumbnail, true, move |job| async move {
                 gallery::run(&toolbox, order, &job).await.map_err(fail)
             }));
         }
         if probe.count.is_some() {
-            let only = probe.entries.iter().any(|entry| skip.contains(&entry.url)).then(|| {
+            // Video by video when the listing has them all, or some were left out (then only the listed ones go).
+            let left_out = probe.entries.iter().any(|entry| skip.contains(&entry.url));
+            let links = (!probe.entries.is_empty() && (!probe.more || left_out)).then(|| {
                 probe.entries.iter().filter(|entry| !skip.contains(&entry.url)).map(|entry| entry.url.clone()).collect()
             });
-            let order = PlaylistOrder { root, url: url.clone(), preset, max_height, limit, only, info_json, cookies };
-            return Ok(self.queue(jobs, url, title, preset.name, thumbnail, move |job| async move {
+            let slots = self.queue.clone();
+            let order =
+                PlaylistOrder { root, url: url.clone(), preset, max_height, limit, links, info_json, cookies, slots };
+            // Not in a slot itself: its videos take them.
+            return Ok(self.queue(jobs, (url, title), preset.name, thumbnail, false, move |job| async move {
                 playlist::run(&toolbox, order, &job).await.map_err(fail)
             }));
         }
         let taken = self.taken.clone();
         let order =
             Order { root, url: url.clone(), preset, max_height, info_json, headers, cookies, taken, place: None, site: None };
-        Ok(self.queue(jobs, url, title, preset.name, thumbnail, move |job| async move {
+        Ok(self.queue(jobs, (url, title), preset.name, thumbnail, true, move |job| async move {
             download::run(&toolbox, order, &job).await.map_err(fail)
         }))
     }
@@ -470,20 +517,22 @@ impl Downloads {
 
     /// Queues a file fetched as it is.
     fn queue_file(&self, jobs: &Arc<Jobs>, url: String, title: String, preset: &str, order: FileOrder) -> DownloadEntry {
-        self.queue(jobs, url, title, preset, None, move |job| async move {
+        self.queue(jobs, (url, title), preset, None, true, move |job| async move {
+            let root = order.root.clone();
             let path = file::run(order, &job).await?;
-            Ok(Saved { path: Some(path), files: None, skipped: None })
+            let bytes = size_of(&root.join(&path));
+            Ok(Saved { path: Some(path), files: None, skipped: None, bytes })
         })
     }
 
-    /// Adds an entry and starts its job in the download queue; the job's result becomes the entry's state.
+    /// Adds an entry and starts its job, in a download slot when `slotted`; the job's result becomes the entry's state.
     fn queue<F, Fut>(
         &self,
         jobs: &Arc<Jobs>,
-        url: String,
-        title: String,
+        (url, title): (String, String),
         preset: &str,
         thumbnail: Option<String>,
+        slotted: bool,
         work: F,
     ) -> DownloadEntry
     where
@@ -493,7 +542,7 @@ impl Downloads {
         // Held while the job starts, so its first update can't come before its entry exists.
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         let downloads = self.clone();
-        let id = jobs.start_in(&self.queue, move |job| async move {
+        let run = move |job: Job| async move {
             let id = job.id();
             downloads.update(id, |entry| entry.state = DownloadState::Running);
             let cancel = job.clone();
@@ -503,11 +552,13 @@ impl Downloads {
                 Ok(saved) => {
                     entry.state = DownloadState::Done;
                     (entry.file, entry.files, entry.skipped) = (saved.path.clone(), saved.files, saved.skipped);
+                    entry.size = saved.bytes;
                 }
                 Err(message) => (entry.state, entry.error) = (DownloadState::Failed, Some(message.clone())),
             });
             result.map(|_| ())
-        });
+        };
+        let id = if slotted { jobs.start_in(&self.queue, run) } else { jobs.start(run) };
         let entry = DownloadEntry {
             id,
             url,
@@ -518,6 +569,7 @@ impl Downloads {
             file: None,
             files: None,
             skipped: None,
+            size: None,
             error: None,
         };
         self.list.put(&entry);

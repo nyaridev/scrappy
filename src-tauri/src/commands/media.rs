@@ -19,6 +19,17 @@ pub async fn entry_thumbnail(downloads: State<'_, Downloads>, url: String) -> Re
     Ok(downloads.preview(&url).await)
 }
 
+/// The size a probed video will download with a preset and height, in bytes; `None` when it isn't known.
+#[tauri::command]
+pub async fn download_size(
+    downloads: State<'_, Downloads>,
+    url: String,
+    preset: String,
+    max_height: Option<u32>,
+) -> Result<Option<u64>, String> {
+    downloads.size(&url, &preset, max_height).await
+}
+
 /// The output presets, the default first.
 #[tauri::command]
 pub fn presets() -> Vec<PresetInfo> {

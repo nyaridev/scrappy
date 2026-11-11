@@ -1,12 +1,16 @@
 //! Download: one link with one preset, as a job. yt-dlp fetches and merges from the probe's JSON (no second
 //! lookup) with progress, ffprobe checks the result, FFmpeg re-encodes it when the preset needs that, and the catalog
-//! records it (ADR-0003, ADR-0004).
+//! records it (ADR-0003, ADR-0004). Before that, the same JSON gives the size the preset's pick will download
+//! (ADR-0017).
 
 // ── Imports ───────────────────────────────
 use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+
+use tempfile::NamedTempFile;
 
 use super::engine;
 use super::inspect::{self, MediaInfo};
@@ -22,6 +26,8 @@ use crate::vault::{Cookie, CookieFile};
 const PROGRESS: &str = "download:SCRAPPY %(progress.downloaded_bytes)s %(progress.total_bytes)s \
                         %(progress.total_bytes_estimate)s";
 const PROGRESS_MARK: &str = "SCRAPPY ";
+/// The picked streams' size: exact, else yt-dlp's estimate (`NA` when it has neither).
+const SIZE: &str = "%(filesize,filesize_approx)s";
 /// yt-dlp prints the saved file's path after its last move.
 pub(super) const FILE_MARK: &str = "SCRAPPYFILE ";
 const VIDEO_TEMPLATE: &str = "Videos/{channel}/{title} [{id}]";
@@ -68,6 +74,8 @@ pub(super) struct Saved {
     pub files: Option<u32>,
     /// For a collection: the files skipped because they were saved before.
     pub skipped: Option<u32>,
+    /// Bytes on disk of what was saved now.
+    pub bytes: Option<u64>,
 }
 
 /// File names (without extension) that running downloads have taken.
@@ -88,6 +96,11 @@ struct Tally {
 }
 
 // ── Private helpers ───────────────────────
+/// The number yt-dlp printed for `SIZE`; `None` for `NA`.
+fn parse_size(output: &str) -> Option<u64> {
+    output.lines().find_map(|line| line.trim().parse::<f64>().ok()).map(|bytes| bytes as u64)
+}
+
 /// Bytes so far and the size (exact, else estimated) from one progress line.
 fn parse_progress(line: &str) -> Option<(u64, Option<u64>)> {
     let fields: Vec<&str> = line.strip_prefix(PROGRESS_MARK)?.split_whitespace().collect();
@@ -260,7 +273,36 @@ pub(super) async fn run(toolbox: &Toolbox, order: Order, job: &Job) -> Result<Sa
     let found = Found { kind, url: &order.url, site, user: info.fields().channel, transferred: Some(transferred) };
     let path = record_file(&order.root, &file, found, media)?;
     tracing::info!("Downloaded a {kind} file");
-    Ok(Saved { path: Some(path), files: None, skipped: None })
+    Ok(Saved { path: Some(path), files: None, skipped: None, bytes: size_of(&file) })
+}
+
+/// The size `preset` at `max_height` will download for the video in `info_json` (a probe's JSON), from yt-dlp's
+/// own format choice run again without the network. `None` when the site doesn't say.
+pub(super) async fn estimate(
+    toolbox: &Toolbox,
+    preset: &Preset,
+    max_height: Option<u32>,
+    info_json: &str,
+) -> Result<Option<u64>, String> {
+    let mut info_file = NamedTempFile::new().map_err(|e| format!("Can't write the video's details: {e}"))?;
+    info_file.write_all(info_json.as_bytes()).map_err(|e| format!("Can't write the video's details: {e}"))?;
+    let mut command = engine::yt_dlp(toolbox)?;
+    command
+        .arg("--load-info-json")
+        .arg(info_file.path())
+        .args(["--simulate", "--print", SIZE, "-f", &preset.format(max_height)])
+        .args(preset.yt_dlp);
+    let output = command.output().await.map_err(|e| format!("yt-dlp didn't start: {e}"))?;
+    if !output.status.success() {
+        let errors: Vec<String> = String::from_utf8_lossy(&output.stderr).lines().map(str::to_string).collect();
+        return Err(engine::error_text(&errors));
+    }
+    Ok(parse_size(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// A file's size on disk, if it can be read.
+pub(super) fn size_of(file: &Path) -> Option<u64> {
+    fs::metadata(file).ok().map(|meta| meta.len())
 }
 
 /// Adds a saved file to the catalog and returns its path relative to the library root.
@@ -284,7 +326,7 @@ pub(super) fn record_file(root: &Path, file: &Path, found: Found<'_>, media: Opt
 
 #[cfg(test)]
 mod tests {
-    use super::{Tally, Taken, escape_template, leftovers, parse_progress, relative, reserve};
+    use super::{Tally, Taken, escape_template, leftovers, parse_progress, parse_size, relative, reserve};
     use std::fs;
     use std::path::Path;
 
@@ -294,6 +336,15 @@ mod tests {
         assert_eq!(parse_progress("SCRAPPY 1024 NA 5000.5"), Some((1024, Some(5000))));
         assert_eq!(parse_progress("SCRAPPY NA NA NA"), None);
         assert_eq!(parse_progress("[download] 50%"), None);
+    }
+
+    #[test]
+    fn reads_the_size() {
+        assert_eq!(parse_size("288387264
+"), Some(288_387_264));
+        assert_eq!(parse_size("30767602.5"), Some(30_767_602));
+        assert_eq!(parse_size("NA
+"), None);
     }
 
     #[test]

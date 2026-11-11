@@ -1,16 +1,17 @@
 //! File: one link fetched straight into a library folder, as a job with progress, then recorded in the catalog:
 //! an image the extension sends (into `Images/{site}/`, images only) or a file Grab picked. The site comes from the
-//! page it was found on.
+//! page it was found on. It keeps under the speed limit (ADR-0017) by waiting between chunks.
 
 // ── Imports ───────────────────────────────
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reqwest::Url;
 use tokio::io::AsyncWriteExt;
 
 use super::download::{Taken, relative, reserve};
+use super::engine;
 use crate::app::USER_AGENT;
 use crate::jobs::{Job, JobPhase};
 use crate::library::{self, template};
@@ -186,6 +187,7 @@ async fn fetch(order: &FileOrder, base: &Path, job: &Job) -> Result<(PathBuf, u6
     let part = PathBuf::from(format!("{}.{ext}.part", base.display()));
     let mut file = tokio::fs::File::create(&part).await.map_err(|e| format!("Can't save the file: {e}"))?;
     let mut done = 0u64;
+    let (limit_speed, started) = (engine::speed_limit(), Instant::now());
     let written: Result<(), String> = async {
         while let Some(chunk) = response.chunk().await.map_err(|e| format!("The file didn't download: {e}"))? {
             if job.cancelled() {
@@ -196,6 +198,12 @@ async fn fetch(order: &FileOrder, base: &Path, job: &Job) -> Result<(PathBuf, u6
                 return Err(too_big.into());
             }
             file.write_all(&chunk).await.map_err(|e| format!("Can't save the file: {e}"))?;
+            if let Some(bytes) = limit_speed {
+                let due = Duration::from_secs_f64(done as f64 / bytes as f64);
+                if let Some(wait) = due.checked_sub(started.elapsed()) {
+                    tokio::time::sleep(wait).await;
+                }
+            }
             if !order.quiet {
                 job.progress(JobPhase::Download, done, total);
             }

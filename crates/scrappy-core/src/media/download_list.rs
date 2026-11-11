@@ -109,6 +109,7 @@ mod tests {
             file: None,
             files: None,
             skipped: None,
+            size: None,
             error: None,
         }
     }

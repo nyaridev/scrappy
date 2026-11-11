@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::download::{Found, Saved, record_file, relative};
+use super::download::{Found, Saved, record_file, relative, size_of};
 use super::engine;
 use super::probe::{PREVIEW_ITEMS, Probe};
 use crate::jobs::Job;
@@ -164,7 +164,7 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
     command.args(["--", &order.url]);
 
     let total = order.total.or(order.limit).map(u64::from);
-    let (mut files, mut skipped, mut folder, mut failed) = (0u32, 0u32, None, None);
+    let (mut files, mut skipped, mut folder, mut failed, mut bytes) = (0u32, 0u32, None, None, 0u64);
     let (ok, errors) = engine::run_lines(command, "gallery-dl", job, |line| {
         let (path, saved) = match line.strip_prefix(SKIPPED_MARK) {
             Some(path) => (PathBuf::from(path.trim()), false),
@@ -176,6 +176,7 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
         if saved {
             let (site, user) = site_and_user(&order.root, &path);
             let found = Found { kind: "social", url: &order.url, site, user, transferred: None };
+            bytes += size_of(&path).unwrap_or(0);
             match record_file(&order.root, &path, found, None) {
                 Ok(_) => files += 1,
                 Err(error) => failed = Some(error),
@@ -195,7 +196,7 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
         return Err(if ok { "There was nothing to download.".into() } else { engine::error_text(&errors) });
     }
     tracing::info!("Saved {files} files with gallery-dl ({skipped} already saved)");
-    Ok(Saved { path: folder, files: Some(files), skipped: Some(skipped) })
+    Ok(Saved { path: folder, files: Some(files), skipped: Some(skipped), bytes: Some(bytes) })
 }
 
 #[cfg(test)]

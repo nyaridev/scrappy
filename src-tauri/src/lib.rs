@@ -38,7 +38,9 @@ pub fn run() {
                 warm.update_yt_dlp().await;
             });
             let vault = Vault::open(&app.path().app_data_dir()?, KeySource::Keychain);
-            let downloads = Downloads::new(toolbox.clone(), vault.clone()).kept_in(&app.path().app_data_dir()?);
+            let downloads = Downloads::new(toolbox.clone(), vault.clone())
+                .kept_in(&app.path().app_data_dir()?)
+                .limited(&store.get().downloads);
             let jobs = Jobs::new(events::job_reporter(app.handle().clone()));
             jobs.continue_after(downloads.last_id());
             let handle = app.handle().clone();
@@ -80,6 +82,7 @@ pub fn run() {
             library::picture,
             settings::get_settings,
             settings::set_look,
+            settings::set_download_limits,
             settings::signed_in_sites,
             settings::forget_site,
             tools::tools_status,
@@ -87,6 +90,7 @@ pub fn run() {
             jobs::cancel_job,
             media::probe_url,
             media::entry_thumbnail,
+            media::download_size,
             media::presets,
             media::start_download,
             media::downloads,

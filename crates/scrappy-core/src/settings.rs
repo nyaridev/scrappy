@@ -1,4 +1,5 @@
-//! Settings: the app's own settings (the library folder, the look) as JSON in the app config folder (ADR-0004).
+//! Settings: the app's own settings (the library folder, the look, how downloads run) as JSON in the app config
+//! folder (ADR-0004).
 
 // ── Imports ───────────────────────────────
 use std::fs;
@@ -13,6 +14,11 @@ const FILE: &str = "settings.json";
 const TEMP_FILE: &str = "settings.json.tmp";
 /// Where an unreadable settings file goes, so starting over never destroys it.
 const BROKEN_FILE: &str = "settings.broken.json";
+/// The most downloads at once the setting allows (ADR-0017).
+const MOST_AT_ONCE: u32 = 20;
+/// The highest speed limit the setting takes, in MB/s: above any real connection.
+const FASTEST: f64 = 10_000.0;
+const MIB: f64 = 1024.0 * 1024.0;
 
 // ── Types ─────────────────────────────────
 /// Everything Scrappy remembers between runs. Missing fields take their defaults, so older files still load.
@@ -23,6 +29,24 @@ pub struct Settings {
     /// The library folder; none until first-run setup.
     pub library_root: Option<PathBuf>,
     pub look: Look,
+    pub downloads: DownloadLimits,
+}
+
+/// How downloads run (ADR-0017).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct DownloadLimits {
+    /// How many downloads run at once, across the app; a playlist's videos count one each.
+    pub at_once: u32,
+    /// Each download's top speed in MB/s (MiB per second); 0 for none.
+    pub speed_limit: f64,
+}
+
+impl Default for DownloadLimits {
+    fn default() -> Self {
+        Self { at_once: 10, speed_limit: 0.0 }
+    }
 }
 
 /// How the window looks.
@@ -73,6 +97,20 @@ fn write(dir: &Path, settings: &Settings) -> Result<(), String> {
 }
 
 // ── Public API ────────────────────────────
+impl DownloadLimits {
+    /// The same limits, brought into range: 1 to 20 at once, a speed of 0 to 10,000 MB/s.
+    pub fn checked(self) -> Self {
+        let speed = if self.speed_limit.is_finite() { self.speed_limit.clamp(0.0, FASTEST) } else { 0.0 };
+        Self { at_once: self.at_once.clamp(1, MOST_AT_ONCE), speed_limit: speed }
+    }
+
+    /// The speed limit in bytes per second, or `None` for no limit.
+    pub fn bytes_per_second(&self) -> Option<u64> {
+        let bytes = (self.speed_limit * MIB) as u64;
+        (bytes > 0).then_some(bytes)
+    }
+}
+
 impl Store {
     /// Loads the settings from `dir`, or the defaults when there are none yet.
     pub fn load(dir: &Path) -> Self {
@@ -94,6 +132,11 @@ impl Store {
         self.update(|settings| settings.look = look)
     }
 
+    /// Saves how downloads run, brought into range, and returns the settings.
+    pub fn set_download_limits(&self, limits: DownloadLimits) -> Result<Settings, String> {
+        self.update(|settings| settings.downloads = limits.checked())
+    }
+
     /// Saves the library folder and returns the settings.
     pub fn set_library_root(&self, root: PathBuf) -> Result<Settings, String> {
         self.update(|settings| settings.library_root = Some(root))
@@ -111,7 +154,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::{BROKEN_FILE, FILE, Look, Settings, Store};
+    use super::{BROKEN_FILE, DownloadLimits, FILE, Look, Settings, Store};
     use std::fs;
 
     #[test]
@@ -137,6 +180,18 @@ mod tests {
         fs::write(dir.path().join(FILE), r#"{"look":{"nativeFrame":true}}"#).unwrap();
         let look = Store::load(dir.path()).get().look;
         assert!(look.native_frame && look.liquid_background);
+    }
+
+    #[test]
+    fn keeps_download_limits_in_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(dir.path());
+        assert_eq!(store.get().downloads, DownloadLimits { at_once: 10, speed_limit: 0.0 });
+        assert_eq!(store.get().downloads.bytes_per_second(), None);
+        let saved = store.set_download_limits(DownloadLimits { at_once: 99, speed_limit: f64::NAN }).unwrap();
+        assert_eq!(saved.downloads, DownloadLimits { at_once: 20, speed_limit: 0.0 });
+        let saved = store.set_download_limits(DownloadLimits { at_once: 0, speed_limit: 1.5 }).unwrap();
+        assert_eq!((saved.downloads.at_once, saved.downloads.bytes_per_second()), (1, Some(1_572_864)));
     }
 
     #[test]

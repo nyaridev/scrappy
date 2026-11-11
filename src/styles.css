@@ -229,6 +229,12 @@ textarea,
   justify-self: start;
 }
 
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4);
+}
+
 .settings-hint {
   margin: 0;
   color: var(--iro-fg-3);
@@ -257,7 +263,14 @@ textarea,
 
 .download-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: var(--iro-space-4);
+}
+
+.download-size {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
 }
 
 /* ── Lists and the video picker ────────── */
