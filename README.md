@@ -55,3 +55,7 @@ pnpm check
 
 Rust does all the work (`crates/scrappy-core/`); Tauri 2 opens the window, and the React + iro-ui window only shows
 what Rust sends. [AGENTS.md](AGENTS.md) has the commands and layout.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
