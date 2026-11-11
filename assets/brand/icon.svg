@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Scrappy">
+  <rect width="1024" height="1024" rx="224" fill="#100f0e"/>
+  <g transform="translate(-172 -64) scale(3.6)"><g fill="none" stroke-width="22.4" stroke-linecap="round" stroke-linejoin="round" stroke="#f0876a"><path d="M132 198V214A14 14 0 0 0 146 228H234A14 14 0 0 0 248 214V198" stroke-opacity="0.4"/><path d="M190 92V170M158 140L190 172L222 140"/></g></g>
+</svg>

@@ -1,10 +1,14 @@
 //! Playlist: a playlist or channel as one job. yt-dlp saves its videos into `Videos/{channel}/{playlist}/` (or
 //! `Audio/…`), skipping videos saved before (its archive in `.scrappy/`) and going on past ones that fail; each saved
-//! file then gets the preset's check and encode, and a catalog row.
+//! file then gets the preset's check and encode, and a catalog row. When the window left some videos out, yt-dlp
+//! gets the picked ones' links in a temporary file instead of the list's link (ADR-0016).
 
 // ── Imports ───────────────────────────────
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
+
+use tempfile::NamedTempFile;
 
 use super::download::{FILE_MARK, Found, Saved, escape_template, finish, record_file, relative};
 use super::engine;
@@ -33,12 +37,26 @@ pub(super) struct PlaylistOrder {
     pub max_height: Option<u32>,
     /// Save only the first this many videos.
     pub limit: Option<u32>,
+    /// The links of the videos to save, when some were left out; `None` for the whole list.
+    pub only: Option<Vec<String>>,
     /// yt-dlp's JSON from the probe: the playlist's title and channel.
     pub info_json: String,
     pub cookies: Option<Vec<Cookie>>,
 }
 
 // ── Private helpers ───────────────────────
+/// A file listing the first `limit` of `links` (web links only), one per line, and how many it lists.
+fn batch_file(links: &[String], limit: Option<u32>) -> Result<(NamedTempFile, u64), String> {
+    let take = limit.map_or(usize::MAX, |limit| limit as usize);
+    let links: Vec<&str> = links.iter().filter_map(|link| engine::check_url(link).ok().map(|_| link.as_str())).take(take).collect();
+    if links.is_empty() {
+        return Err("No videos are picked.".into());
+    }
+    let mut file = NamedTempFile::new().map_err(|e| format!("Can't write the list of videos: {e}"))?;
+    file.write_all(links.join("\n").as_bytes()).map_err(|e| format!("Can't write the list of videos: {e}"))?;
+    Ok((file, links.len() as u64))
+}
+
 /// The total from `[download] Downloading item 3 of 40`.
 fn item_total(line: &str) -> Option<u64> {
     line.strip_prefix(ITEM_TEXT)?.split_once(" of ")?.1.trim().parse().ok()
@@ -68,12 +86,23 @@ pub(super) async fn run(toolbox: &Toolbox, order: PlaylistOrder, job: &Job) -> R
         .arg(order.root.join(ARCHIVE))
         .arg("-o")
         .arg(format!("{}/%(title)s [%(id)s].%(ext)s", escape_template(&folder.to_string_lossy())));
-    if let Some(limit) = order.limit {
-        command.args(["--playlist-items", &format!("1-{limit}")]);
+    // Kept until this function returns, like the cookies file.
+    let batch = order.only.as_deref().map(|links| batch_file(links, order.limit)).transpose()?;
+    let mut total = order.limit.map(u64::from);
+    match &batch {
+        Some((file, count)) => {
+            command.arg("-a").arg(file.path());
+            total = Some(*count);
+        }
+        None => {
+            if let Some(limit) = order.limit {
+                command.args(["--playlist-items", &format!("1-{limit}")]);
+            }
+            command.args(["--", &order.url]);
+        }
     }
-    command.args(["--", &order.url]);
 
-    let (mut saved, mut skipped, mut total) = (Vec::new(), 0u32, order.limit.map(u64::from));
+    let (mut saved, mut skipped) = (Vec::new(), 0u32);
     let (ok, errors) = engine::run_lines(command, "yt-dlp", job, |line| {
         let name = if let Some(path) = line.strip_prefix(FILE_MARK) {
             let path = PathBuf::from(path.trim());
@@ -109,7 +138,16 @@ pub(super) async fn run(toolbox: &Toolbox, order: PlaylistOrder, job: &Job) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::item_total;
+    use super::{batch_file, item_total};
+
+    #[test]
+    fn lists_the_picked_videos() {
+        let links = ["https://youtu.be/a", "file:///etc/passwd", "https://youtu.be/b", "https://youtu.be/c"].map(String::from);
+        let (file, count) = batch_file(&links, Some(2)).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), "https://youtu.be/a\nhttps://youtu.be/b");
+        assert!(batch_file(&[], None).is_err());
+    }
 
     #[test]
     fn reads_the_playlist_size() {

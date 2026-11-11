@@ -16,7 +16,7 @@ fn packs_folder(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// The built-in packs and the user's.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hunt_packs(app: AppHandle) -> Packs {
     hunt::packs(packs_folder(&app).ok().as_deref())
 }
@@ -35,7 +35,7 @@ pub async fn start_hunt(
 }
 
 /// Opens the user's packs folder in the file manager.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_packs_folder(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::open_path(packs_folder(&app)?, None::<&str>).map_err(|e| format!("Can't open the folder: {e}"))
 }

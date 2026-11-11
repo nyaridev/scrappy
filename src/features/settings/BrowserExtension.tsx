@@ -4,6 +4,7 @@
 import { Button, Icon, PropertyList, SectionTitle, toast } from "iro-ui";
 import { PuzzleIcon } from "iro-ui/icons";
 import { useEffect, useState } from "react";
+import { useViewShown } from "../../app/viewShown";
 import { connectBrowsers, disconnectBrowsers, hostStatus } from "../../lib/backend";
 import type { HostStatus } from "../../lib/types/HostStatus";
 
@@ -12,12 +13,14 @@ import type { HostStatus } from "../../lib/types/HostStatus";
 export function BrowserExtension() {
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const shown = useViewShown();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is there to check again when Settings shows
   useEffect(() => {
     hostStatus()
       .then(setStatus)
       .catch(() => {});
-  }, []);
+  }, [shown]);
 
   const run = (action: () => Promise<HostStatus>, failed: string) => {
     setBusy(true);

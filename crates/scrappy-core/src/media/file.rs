@@ -24,6 +24,8 @@ const MAX_FILE_BYTES: u64 = 50_000_000_000;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// The error a file under its order's smallest size ends with.
 pub(super) const TOO_SMALL: &str = "Smaller than the smallest size.";
+/// Words at the end of an address that aren't the file's name: `…/Cat.png/revision/latest`.
+const FILLER: &[&str] = &["latest", "revision", "original", "orig", "full", "raw", "download"];
 
 // ── Types ─────────────────────────────────
 /// Everything one file download needs.
@@ -51,10 +53,29 @@ fn site_of(url: &str) -> Option<String> {
     Some(site.split('.').next().unwrap_or(&site).to_string())
 }
 
-/// The file name in the link without its extension, decoded: `.../Sunset%20sky.jpg?w=2` → `Sunset sky`.
+/// The extension of one part of an address: `Clip.MP4` → `mp4`; `1.2.3` and `watch` have none.
+fn segment_extension(segment: &str) -> Option<String> {
+    let (_, ext) = segment.rsplit_once('.')?;
+    let ok = (1..=5).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        && ext.chars().any(|c| c.is_ascii_alphabetic());
+    ok.then(|| ext.to_ascii_lowercase())
+}
+
+/// The file name in the link without its extension, decoded: `.../Sunset%20sky.jpg?w=2` → `Sunset sky`. When the
+/// last part has no extension, an earlier part with one wins (`…/Cat.png/revision/latest/50` → `Cat`), else the last
+/// part that isn't filler or a number.
 fn name_of(url: &str) -> Option<String> {
     let url = Url::parse(url).ok()?;
-    let last = url.path_segments()?.rev().find(|segment| !segment.is_empty())?;
+    let segments: Vec<&str> = url.path_segments()?.filter(|segment| !segment.is_empty()).collect();
+    let named = segments.iter().rev().find(|segment| segment_extension(segment).is_some());
+    let plain = || {
+        let filler = |segment: &&&str| {
+            FILLER.contains(&segment.to_ascii_lowercase().as_str()) || segment.chars().all(|c| c.is_ascii_digit())
+        };
+        segments.iter().rev().find(|segment| !filler(segment)).or(segments.last())
+    };
+    let last = named.or_else(plain)?;
     let decoded = String::from_utf8(percent_decode(last)).ok()?;
     let stem = Path::new(&decoded).file_stem()?.to_string_lossy().trim().to_string();
     (!stem.is_empty()).then_some(stem)
@@ -110,11 +131,7 @@ fn extension_for(mime: &str) -> Option<&'static str> {
 fn extension_in(url: &str) -> Option<String> {
     let url = Url::parse(url).ok()?;
     let last = url.path_segments()?.rev().find(|segment| !segment.is_empty())?;
-    let (_, ext) = last.rsplit_once('.')?;
-    let ok = (1..=5).contains(&ext.len())
-        && ext.chars().all(|c| c.is_ascii_alphanumeric())
-        && ext.chars().any(|c| c.is_ascii_alphabetic());
-    ok.then(|| ext.to_ascii_lowercase())
+    segment_extension(last)
 }
 
 async fn fetch(order: &FileOrder, base: &Path, job: &Job) -> Result<(PathBuf, u64), String> {
@@ -144,7 +161,16 @@ async fn fetch(order: &FileOrder, base: &Path, job: &Job) -> Result<(PathBuf, u6
         let ext = extension_for(&mime).filter(|_| mime.starts_with("image/")).ok_or("This link isn't an image.")?;
         (ext.to_string(), MAX_IMAGE_BYTES, "The image is larger than 500 MB.")
     } else {
-        let ext = extension_in(&order.url).or_else(|| extension_for(&mime).map(str::to_string));
+        // A link that looked like a picture or a clip but answers with a web page (a wiki's `File:Cat.png` page).
+        if order.kind != "file" && matches!(mime.as_str(), "text/html" | "application/xhtml+xml") {
+            return Err("The link gave a web page, not a file.".into());
+        }
+        // An image's type beats its link: sites send WebP for a `.png` address.
+        let typed = extension_for(&mime).filter(|_| order.kind == "image" && mime.starts_with("image/"));
+        let ext = typed
+            .map(str::to_string)
+            .or_else(|| extension_in(&order.url))
+            .or_else(|| extension_for(&mime).map(str::to_string));
         (ext.unwrap_or_else(|| "bin".into()), MAX_FILE_BYTES, "The file is larger than 50 GB.")
     };
     let total = response.content_length();
@@ -221,7 +247,60 @@ pub(super) async fn run(order: FileOrder, job: &Job) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extension_for, extension_in, name_of, site_of};
+    use super::{FileOrder, extension_for, extension_in, name_of, run, site_of};
+    use crate::crawl::test_site::serve;
+    use crate::jobs::Jobs;
+    use std::sync::{Arc, Mutex};
+
+    /// A wiki: a `.png` link that answers with its page, and one that answers with WebP.
+    fn route(path: &str, _: &str) -> Option<(&'static str, Vec<u8>)> {
+        Some(match path {
+            "/wiki/File:Cat.png" => {
+                ("text/html; charset=UTF-8", b"<!DOCTYPE html><title>File:Cat.png</title>".to_vec())
+            }
+            "/images/Cat.png/revision/latest" => ("image/webp", b"RIFF   WEBPVP8 ".to_vec()),
+            _ => return None,
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn keeps_only_real_media_and_names_it_by_its_type() {
+        let address = serve(route).await;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".scrappy")).unwrap();
+        let order = |url: String| FileOrder {
+            root: root.clone(),
+            url,
+            page_url: None,
+            headers: Vec::new(),
+            taken: Arc::new(Mutex::new(Default::default())),
+            kind: "image",
+            folder: Some("Images/wiki".into()),
+            min_bytes: 0,
+            quiet: true,
+        };
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let jobs = Jobs::new(Arc::new(|_| {}));
+        let (page, picture) = (
+            order(format!("{address}wiki/File:Cat.png")),
+            order(format!("{address}images/Cat.png/revision/latest")),
+        );
+        let sink = results.clone();
+        jobs.start(move |job| async move {
+            let first = run(page, &job).await;
+            let second = run(picture, &job).await;
+            sink.lock().unwrap().extend([first, second]);
+            Ok(())
+        });
+        while results.lock().unwrap().len() < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let results = results.lock().unwrap();
+        assert!(results[0].as_ref().unwrap_err().contains("web page"));
+        assert_eq!(results[1].as_deref(), Ok("Images/wiki/Cat.webp"));
+        assert!(!dir.path().join("Images/wiki/File_Cat.png").exists());
+    }
 
     #[test]
     fn names_the_site() {
@@ -238,6 +317,10 @@ mod tests {
         assert_eq!(name_of("https://a.com/media/abc123/").as_deref(), Some("abc123"));
         assert_eq!(name_of("https://a.com/"), None);
         assert_eq!(name_of("https://a.com/%FF%FE.png"), None);
+        let wiki = "https://static.wikia.nocookie.net/w/images/a/ab/Sword.png/revision/latest/scale-to-width-down/50?cb=1";
+        assert_eq!(name_of(wiki).as_deref(), Some("Sword"));
+        let logo = "https://static.wikia.nocookie.net/w/images/3/39/Site-community-image/revision/latest?cb=1";
+        assert_eq!(name_of(logo).as_deref(), Some("Site-community-image"));
     }
 
     #[test]

@@ -1,7 +1,8 @@
 // useCached: a value from Rust kept for the whole session, so a view opened again shows it in its first frame (no
-// empty rows popping in, no layout shift) while a fresh copy loads.
+// empty rows popping in, no layout shift) while a fresh copy loads, each time its view is shown.
 
 import { useCallback, useEffect, useState } from "react";
+import { useViewShown } from "./viewShown";
 
 // ── State ─────────────────────────────────
 const values = new Map<string, unknown>();
@@ -18,6 +19,8 @@ export function useCached<T>(key: string, load: () => Promise<T>): [T | null, (v
     },
     [key],
   );
-  useEffect(() => void load().then(update), [load, update]);
+  const shown = useViewShown();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is there to load again when the view shows
+  useEffect(() => void load().then(update), [load, update, shown]);
   return [value, update];
 }

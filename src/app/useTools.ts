@@ -20,6 +20,13 @@ export interface ToolRow {
 // ── State ─────────────────────────────────
 /** The last list Rust sent, shared by every view that shows the tools. */
 let lastStatuses: ToolStatus[] | null = null;
+/** The install jobs' ids: every other job (a thousand downloads) is none of this hook's business. */
+const toolJobs = new Set<number>();
+
+// ── Private helpers ───────────────────────
+function noteJobs(statuses: ToolStatus[] | null) {
+  for (const status of statuses ?? []) if (status.job !== null) toolJobs.add(status.job);
+}
 
 // ── Public API ────────────────────────────
 /** The tool rows (`null` until Rust answers), whether any can be downloaded or is downloading, and the actions. */
@@ -33,6 +40,7 @@ export function useTools() {
   const refresh = useCallback(
     () =>
       void toolsStatus().then((fresh) => {
+        noteJobs(fresh);
         lastStatuses = fresh;
         setStatuses(fresh);
       }),
@@ -41,8 +49,11 @@ export function useTools() {
 
   useEffect(() => {
     refresh();
-    const stopProgress = onJobProgress((report) => setProgress((all) => ({ ...all, [report.id]: report })));
+    const stopProgress = onJobProgress((report) => {
+      if (toolJobs.has(report.id)) setProgress((all) => ({ ...all, [report.id]: report }));
+    });
     const stopFinished = onJobFinished(({ id, result }) => {
+      if (!toolJobs.has(id)) return;
       if (result.state === "failed") setErrors((all) => ({ ...all, [id]: result.message }));
       refresh();
     });
@@ -54,6 +65,7 @@ export function useTools() {
 
   const install = useCallback(async () => {
     const started = await installTools();
+    for (const job of started) toolJobs.add(job.id);
     setLastJob((all) => Object.fromEntries([...Object.entries(all), ...started.map((job) => [job.tool, job.id])]));
     setStatuses(
       (all) => all?.map((s) => ({ ...s, job: started.find((job) => job.tool === s.tool)?.id ?? s.job })) ?? null,

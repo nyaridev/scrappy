@@ -6,6 +6,7 @@ import { CalendarIcon, ClockIcon, FileIcon, FolderIcon, GlobeIcon, HomeIcon } fr
 import { useEffect } from "react";
 import { useCached } from "../../app/useCached";
 import { libraryStats, onJobFinished, recentDownloads } from "../../lib/backend";
+import { coalesce } from "../../lib/coalesce";
 import { formatBytes, formatDay } from "../../lib/format";
 import { kindOf } from "../../lib/kinds";
 import { RecentList } from "./RecentList";
@@ -13,6 +14,7 @@ import { RecentList } from "./RecentList";
 // ── Constants ─────────────────────────────
 const RECENT = 8;
 const TOP_SITES = 5;
+const RELOAD_MS = 1000;
 
 // ── Private helpers ───────────────────────
 const loadRecent = () => recentDownloads(RECENT);
@@ -23,14 +25,14 @@ export function HomeView() {
   const [stats, setStats] = useCached("libraryStats", libraryStats);
   const [recent, setRecent] = useCached("recentDownloads", loadRecent);
 
-  useEffect(
-    () =>
-      onJobFinished(() => {
-        void libraryStats().then(setStats);
-        void loadRecent().then(setRecent);
-      }),
-    [setStats, setRecent],
-  );
+  // A grab of a thousand files ends a thousand jobs: the numbers are read again at most once a second.
+  useEffect(() => {
+    const reload = coalesce(() => {
+      void libraryStats().then(setStats);
+      void loadRecent().then(setRecent);
+    }, RELOAD_MS);
+    return onJobFinished(reload);
+  }, [setStats, setRecent]);
 
   if (!stats || !recent) return null;
   if (stats.files === 0) return <EmptyState icon={<Icon icon={HomeIcon} size={32} />} title="No downloads yet" />;

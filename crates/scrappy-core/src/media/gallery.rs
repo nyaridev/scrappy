@@ -10,13 +10,15 @@ use serde_json::Value;
 
 use super::download::{Found, Saved, record_file, relative};
 use super::engine;
-use super::probe::{LIST_LIMIT, PREVIEW_ITEMS, Probe};
+use super::probe::{PREVIEW_ITEMS, Probe};
 use crate::jobs::Job;
 use crate::tools::Toolbox;
 use crate::vault::{Cookie, CookieFile};
 
 // ── Constants ─────────────────────────────
 const LIST_TIMEOUT: Duration = Duration::from_secs(120);
+/// How many files a listing reads; a bigger profile shows "50+". Kept small: these sites limit request rates.
+const LIST_LIMIT: u32 = 50;
 const FOLDER: &str = "Social";
 const ARCHIVE: &str = ".scrappy/gallery-dl.sqlite3";
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "avif"];
@@ -127,6 +129,8 @@ impl Listing {
             more: self.more,
             files: true,
             items: self.items.clone(),
+            sections: Vec::new(),
+            entries: Vec::new(),
         }
     }
 }

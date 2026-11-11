@@ -111,6 +111,11 @@ impl Jobs {
         Arc::new(Self { next: AtomicU32::new(1), running: Mutex::new(HashMap::new()), report })
     }
 
+    /// New ids start after `id`, so they never match one kept from before (the Download list, ADR-0016).
+    pub fn continue_after(&self, id: JobId) {
+        self.next.fetch_max(id.saturating_add(1), Ordering::Relaxed);
+    }
+
     /// Starts `work` in the background and returns its id at once. Must be called inside a Tokio runtime (an async
     /// command). A cancelled job reports `Cancelled` whatever `work` returns.
     pub fn start<F, Fut>(self: &Arc<Self>, work: F) -> JobId

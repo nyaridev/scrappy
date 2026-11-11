@@ -14,21 +14,21 @@ fn folders(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
 }
 
 /// Which browsers start this app's host.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn host_status(app: AppHandle) -> Result<HostStatus, String> {
     let (dir, data) = folders(&app)?;
     Ok(bridge::host_status(&dir, &data))
 }
 
 /// Connects every installed browser to this app's host.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn connect_browsers(app: AppHandle) -> Result<HostStatus, String> {
     let (dir, data) = folders(&app)?;
     bridge::connect(&dir, &data)
 }
 
 /// Disconnects every browser.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn disconnect_browsers(app: AppHandle) -> Result<HostStatus, String> {
     let (dir, data) = folders(&app)?;
     Ok(bridge::disconnect(&dir, &data))

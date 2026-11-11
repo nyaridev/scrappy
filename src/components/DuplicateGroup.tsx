@@ -1,11 +1,12 @@
 // DuplicateGroup: one group of copies side by side, the best first and marked; a checkbox on each picks it for the
-// trash.
+// trash. Right-click: Open, Show in folder.
 
-import { Badge, Checkbox, Icon, Image, Skeleton, Tooltip } from "iro-ui";
+import { Badge, Checkbox, ContextMenu, Icon, Image, Skeleton, Tooltip } from "iro-ui";
 import { ImageIcon } from "iro-ui/icons";
 import { useThumbnail } from "../app/useThumbnail";
 import { formatBytes } from "../lib/format";
 import type { Picture } from "../lib/types/Picture";
+import { fileMenu } from "./fileMenu";
 
 // ── Private helpers ───────────────────────
 function Copy({
@@ -26,34 +27,36 @@ function Copy({
     formatBytes(picture.bytes),
   ];
   return (
-    <li className="copy" data-picked={picked || undefined}>
-      <span className="copy-thumb">
-        {thumb === undefined ? (
-          <Skeleton className="tile-thumb" />
-        ) : thumb ? (
-          <Image className="tile-thumb" src={thumb} alt="" ratio={16 / 9} fit="contain" />
-        ) : (
-          <span className="tile-thumb tile-thumb-empty">
-            <Icon icon={ImageIcon} size={24} />
-          </span>
-        )}
-        {best && (
-          <Badge className="tile-kind" tone="success">
-            Best
-          </Badge>
-        )}
-      </span>
-      <Checkbox
-        checked={picked}
-        onCheckedChange={onPick}
-        label={
-          <Tooltip content={picture.path}>
-            <span className="tile-name">{picture.name}</span>
-          </Tooltip>
-        }
-        description={facts.join(" · ")}
-      />
-    </li>
+    <ContextMenu items={fileMenu(picture.path)}>
+      <li className="copy" data-picked={picked || undefined}>
+        <span className="copy-thumb">
+          {thumb === undefined ? (
+            <Skeleton className="tile-thumb" />
+          ) : thumb ? (
+            <Image className="tile-thumb" src={thumb} alt="" ratio={16 / 9} fit="contain" />
+          ) : (
+            <span className="tile-thumb tile-thumb-empty">
+              <Icon icon={ImageIcon} size={24} />
+            </span>
+          )}
+          {best && (
+            <Badge className="tile-kind" tone="success">
+              Best
+            </Badge>
+          )}
+        </span>
+        <Checkbox
+          checked={picked}
+          onCheckedChange={onPick}
+          label={
+            <Tooltip content={picture.path}>
+              <span className="tile-name">{picture.name}</span>
+            </Tooltip>
+          }
+          description={facts.join(" · ")}
+        />
+      </li>
+    </ContextMenu>
   );
 }
 

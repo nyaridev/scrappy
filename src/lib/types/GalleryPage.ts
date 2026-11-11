@@ -2,6 +2,6 @@
 import type { GalleryItem } from "./GalleryItem";
 
 /**
- * A page of files and how many match in all.
+ * A page of files, how many match in all, and the kinds and sites the folder holds (for the filters).
  */
-export type GalleryPage = { items: Array<GalleryItem>, total: number, };
+export type GalleryPage = { items: Array<GalleryItem>, total: number, kinds: Array<string>, sites: Array<string>, };

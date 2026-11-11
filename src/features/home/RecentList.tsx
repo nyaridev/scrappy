@@ -1,6 +1,8 @@
 // RecentList: the latest downloads, newest first, each with a button that shows it in the file manager.
+// Right-click: Open, Show in folder.
 
-import { Icon, ListItem, Tooltip } from "iro-ui";
+import { ContextMenu, Icon, ListItem, Tooltip } from "iro-ui";
+import { fileMenu } from "../../components/fileMenu";
 import { ShowInFolderButton } from "../../components/ShowInFolderButton";
 import { formatBytes, formatWhen } from "../../lib/format";
 import { kindOf } from "../../lib/kinds";
@@ -14,19 +16,20 @@ export function RecentList({ downloads }: { downloads: RecentDownload[] }) {
       {downloads.map((download) => {
         const kind = kindOf(download.kind);
         return (
-          <ListItem
-            as="li"
-            key={download.path}
-            start={<Icon icon={kind.icon} label={kind.label} />}
-            title={
-              <Tooltip content={download.path}>
-                <span>{download.name}</span>
-              </Tooltip>
-            }
-            description={[download.site, formatBytes(download.bytes)].filter(Boolean).join(" · ")}
-            meta={formatWhen(download.downloadedAt)}
-            actions={<ShowInFolderButton path={download.path} />}
-          />
+          <ContextMenu key={download.path} items={fileMenu(download.path)}>
+            <ListItem
+              as="li"
+              start={<Icon icon={kind.icon} label={kind.label} />}
+              title={
+                <Tooltip content={download.path}>
+                  <span>{download.name}</span>
+                </Tooltip>
+              }
+              description={[download.site, formatBytes(download.bytes)].filter(Boolean).join(" · ")}
+              meta={formatWhen(download.downloadedAt)}
+              actions={<ShowInFolderButton path={download.path} />}
+            />
+          </ContextMenu>
         );
       })}
     </ul>

@@ -23,6 +23,9 @@ The window shows what Rust sends and passes clicks on. It doesn't decide, comput
 - Tooltips are iro-ui's `Tooltip` (an `IconButton`'s label already is one). Never a `title` attribute.
 - It's a desktop window: text keeps the arrow cursor and can't be selected (`styles.css`). Only typed fields show the
   text cursor. Mark text worth copying (a saved file's path, an error) with the `selectable` class.
+- The browser's own right-click menu is off (`App.tsx`), except in text fields and `selectable` text. A row the user
+  acts on (a file, a download, a site) gets an iro-ui `ContextMenu` with the same actions as its buttons;
+  `src/components/fileMenu.tsx` has a library file's (Open, Show in folder) and Copy link.
 
 ## Layout
 
@@ -31,13 +34,23 @@ The window shows what Rust sends and passes clicks on. It doesn't decide, comput
   there's a library), `AppBackdrop.tsx` (iro-ui's liquid `Backdrop`), `SettingsProvider.tsx` (the settings and
   `useSettings`), `useTools.ts` (tool status, installs and their job events), `useCached.ts` (a value from Rust kept
   for the session), `useThumbnail.ts` (a library file's thumbnail), `useHandedPage.ts` (opens Grab with a page the
-  extension handed over), `WindowControls.tsx` and `views.ts` (the list of views). Shared hooks go here too.
+  extension handed over), `viewShown.ts` (how many times a view has shown), `KeptView.tsx` (an opened view, kept
+  hidden), `WindowControls.tsx` and `views.ts` (the list of views). Shared hooks go here too.
 - `src/features/setup/`: the first-run screens (`SetupView`, then `ToolsStep`). They aren't tabs, so they're not in
   `views.ts`.
 - A view that shows data Rust already sent this session reads it through `useCached` (or keeps its last list, as
   `useTools` and `useDownloads` do), so it opens complete in its first frame instead of shifting as rows arrive.
+- Views stay mounted once opened (`App.tsx` hides the others), so fields, results and scroll survive switching. Keep
+  a view's state in the view, not in module variables. `KeptView.tsx` hides with `content-visibility: hidden`
+  (`styles.css`), which skips the hidden view's layout and costs little on a switch; it keeps the scroll itself.
+  Don't hide views with `visibility`, `inert` or `pointer-events`: on a thousand-row view they cost half a second.
+  A load that runs on mount puts `useViewShown()` (`src/app/viewShown.ts`) in its effect's dependencies, so it runs
+  again each time the view shows; `useCached` does this already.
 - Job progress reaches the window only through `onJobProgress` and `onJobFinished` in `backend.ts`; views follow
-  their own jobs by id.
+  their own jobs by id. Events come in bursts (a grab sends one per file): apply them in batches with
+  `src/lib/coalesce.ts`, and let a row in a long list read its own download with `useDownload(id)`, so a report
+  redraws one row, not the list. Long lists show 100 rows at a time or use `content-visibility: auto`. Changes in the
+  library folder arrive through `onLibraryChanged` (the Gallery reloads).
 - The header is the title bar (ADR-0011): it follows `AppInfo.frame`. `custom` adds `WindowControls`, `custom` and
   `overlay` make it the drag area (`data-tauri-drag-region`), `native` is a plain header.
 - `src/features/<view>/`: one folder per view, `<View>View.tsx` plus its own components.

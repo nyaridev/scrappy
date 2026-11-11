@@ -20,13 +20,13 @@ pub async fn find_duplicates(
 }
 
 /// The groups a finished scan found, best copy first; once.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicates_found(duplicates: State<Duplicates>, id: JobId) -> Option<Vec<Vec<Picture>>> {
     duplicates.take(id)
 }
 
 /// Moves library files to the system trash and drops them from the catalog; returns how many moved.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trash_files(settings: State<Store>, paths: Vec<String>) -> Result<u32, String> {
     dedupe::trash(&settings.library_root()?, &paths)
 }

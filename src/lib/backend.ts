@@ -5,9 +5,9 @@
 // `?outdated` (the tools step: Scrappy's yt-dlp and a system FFmpeg are older than the pins), `?probeFails` (a
 // link check fails), `?empty` (a library with no downloads yet, no signed-in sites), `?signIn` (a link check needs a
 // sign-in),
-// links with `playlist` or `/@` (a 40-video playlist), links to x.com, instagram.com or bsky.app (a profile with
-// 50+ files), `?scanFails` (Grab's scan finds no browser), `?handed` (the extension handed a page to Grab at start),
-// `?overlay` (macOS title bar), `?native` (system title bar), `?packProblem` (a user's Hunt pack can't be read), `?noHost` (no scrappy-host beside the app). The default is a ready library, every tool installed and
+// links with `playlist` (a 40-video playlist), links with `/@` (a channel: Videos and Shorts), links to x.com,
+// instagram.com or bsky.app (a profile with 50+ files), two kept downloads unless `?empty`, `?scanFails` (Grab's scan finds no browser), `?handed` (the extension handed a page to Grab at start),
+// `?overlay` (macOS title bar), `?native` (system title bar), `?packProblem` (a user's Hunt pack can't be read), `?bigPage` (Grab's scan finds 1300 images), `?noHost` (no scrappy-host beside the app). The default is a ready library, every tool installed and
 // the custom title bar.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -30,6 +30,7 @@ import type { HuntStarted } from "./types/HuntStarted";
 import type { JobFinished } from "./types/JobFinished";
 import type { JobProgress } from "./types/JobProgress";
 import type { LibraryStatus } from "./types/LibraryStatus";
+import type { ListEntry } from "./types/ListEntry";
 import type { Look } from "./types/Look";
 import type { Packs } from "./types/Packs";
 import type { PageScan } from "./types/PageScan";
@@ -88,7 +89,8 @@ if (flags.has("outdated")) {
 let fakeHandedTaken = false;
 const fakeProgress = new Set<(progress: JobProgress) => void>();
 const fakeFinished = new Set<(finished: JobFinished) => void>();
-let fakeJobId = 0;
+// Above the kept fake downloads' ids.
+let fakeJobId = 1000;
 
 const fakePresets: PresetInfo[] = [
   { id: "editor-mp4", name: "MP4 (H.264)", audio: false },
@@ -100,10 +102,32 @@ const fakePresets: PresetInfo[] = [
   { id: "flac", name: "FLAC", audio: true },
   { id: "wav", name: "WAV", audio: true },
 ];
-let fakeDownloads: DownloadEntry[] = [];
 const fakeThumbnail = `data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><defs><linearGradient id="g"><stop stop-color="#3a5f4a"/><stop offset="1" stop-color="#8fae6e"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/></svg>',
 )}`;
+const fakeKept = { thumbnail: fakeThumbnail, files: null, skipped: null, preset: "MP4 (H.264)" };
+let fakeDownloads: DownloadEntry[] = flags.has("empty")
+  ? []
+  : [
+      {
+        ...fakeKept,
+        id: 901,
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        title: "An older download",
+        state: "done",
+        file: "Videos/someone/An older download [dQw4w9WgXcQ].mp4",
+        error: null,
+      },
+      {
+        ...fakeKept,
+        id: 902,
+        url: "https://vimeo.com/1",
+        title: "A failed one",
+        state: "failed",
+        file: null,
+        error: "Download failed: connection reset",
+      },
+    ];
 
 const fakeEmpty = flags.has("empty");
 const fakeRecent: RecentDownload[] = fakeEmpty
@@ -148,9 +172,10 @@ const fakeStats: Stats = {
 };
 
 /** What a fake link holds, by its address. */
-function fakeLinkKind(url: string): "video" | "playlist" | "profile" {
+function fakeLinkKind(url: string): "video" | "playlist" | "channel" | "profile" {
   if (/x\.com|instagram\.com|bsky\.app/.test(url)) return "profile";
-  return /playlist|\/@/.test(url) ? "playlist" : "video";
+  if (/\/@/.test(url)) return "channel";
+  return /playlist/.test(url) ? "playlist" : "video";
 }
 
 /** A fake job: reports `total` bytes (or with `items`, files) over about two seconds, then ends with `failed` or
@@ -200,7 +225,6 @@ const fakeGallery: GalleryItem[] = fakeEmpty
         bytes: (index + 1) * 3_100_000,
         duration: kind === "image" ? null : 30 + index * 7,
         downloadedAt: Math.floor(Date.now() / 1000) - index * 5400,
-        missing: index === 7,
       };
     });
 
@@ -265,6 +289,15 @@ function fakePage(url: string): PageScan {
         size: index === 5 ? null : 180_000 * (index + 1),
       })),
       { url: `${base}/press-kit.pdf`, kind: "other", name: "press-kit.pdf", size: 2_400_000 },
+      // `?bigPage`: a page of 1300 images, to try grabbing a lot at once.
+      ...(flags.has("bigPage")
+        ? Array.from({ length: 1300 }, (_, n) => ({
+            url: `${base}/gallery/${n}.jpg`,
+            kind: "image" as const,
+            name: `photo-${n}.jpg`,
+            size: 40_000 + n * 97,
+          }))
+        : []),
     ],
   };
 }
@@ -373,7 +406,7 @@ export async function probeUrl(url: string): Promise<Probe> {
     return Promise.reject(
       "youtube.com needs you signed in. Send the page from the Scrappy extension to share your sign-in.",
     );
-  const one = { count: null, more: false, files: false, items: [] };
+  const one = { count: null, more: false, files: false, items: [], sections: [], entries: [] };
   const video = { url, channel: "jawed", duration: 19, site: "youtube", thumbnail: fakeThumbnail };
   switch (fakeLinkKind(url)) {
     case "video":
@@ -389,6 +422,37 @@ export async function probeUrl(url: string): Promise<Probe> {
         more: false,
         files: false,
         items: ["Pygame Tutorial #1 - Basic Movement", "Pygame Tutorial #2 - Jumping", "Pygame Tutorial #3 - Sprites"],
+        sections: [],
+        entries: fakeListEntries(40, "Pygame Tutorial #", "watch?v=pg"),
+      };
+    case "channel":
+      return {
+        ...video,
+        title: "GDULA",
+        channel: "GDULA",
+        duration: null,
+        heights: [2160, 1440, 1080, 720, 480, 360],
+        count: 22,
+        more: false,
+        files: false,
+        items: ["GDULA - TOM FORD", "GDULA - KOSMOS", "GDULA - NOCE"],
+        sections: [
+          {
+            url: `${url}/videos`,
+            title: "Videos",
+            count: 6,
+            more: false,
+            entries: fakeListEntries(6, "Video ", "watch?v=v"),
+          },
+          {
+            url: `${url}/shorts`,
+            title: "Shorts",
+            count: 16,
+            more: false,
+            entries: fakeListEntries(16, "Short ", "shorts/s"),
+          },
+        ],
+        entries: [],
       };
     case "profile":
       return {
@@ -403,8 +467,32 @@ export async function probeUrl(url: string): Promise<Probe> {
         more: true,
         files: true,
         items: ["3lmxqzg2b4c2a_1.jpeg", "3lmxqzg2b4c2a_2.jpeg", "3llwpk7rjvs2x_1.mp4"],
+        sections: [],
+        entries: [],
       };
   }
+}
+
+/** `count` fake videos of a list: `Video 1`, `Video 2`… */
+function fakeListEntries(count: number, title: string, path: string): ListEntry[] {
+  return Array.from({ length: count }, (_, n) => ({
+    url: `https://www.youtube.com/${path}${n + 1}`,
+    title: `${title}${n + 1}`,
+    duration: path.startsWith("shorts") ? null : 45 + ((n * 97) % 1800),
+    views: ((n * 7919) % 97) * 1300 + 400,
+    tall: path.startsWith("shorts"),
+  }));
+}
+
+/** The thumbnail of a video a probe listed, as a `data:` URL; null when there's none. */
+export async function entryThumbnail(url: string): Promise<string | null> {
+  if (inTauri) return invoke("entry_thumbnail", { url });
+  await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 400));
+  const hue = [...url].reduce((sum, c) => sum + c.charCodeAt(0) * 7, 0) % 360;
+  const [w, h] = url.includes("/shorts/") ? [180, 320] : [320, 180];
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="hsl(${hue} 45% 32%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 55% 58%)"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 6}" fill="white" fill-opacity="0.25"/></svg>`,
+  )}`;
 }
 
 /** The output presets, the default first. */
@@ -412,16 +500,27 @@ export async function presets(): Promise<PresetInfo[]> {
   return inTauri ? invoke("presets") : fakePresets;
 }
 
-/** Queues a download; follow its progress by the entry's id. */
-export async function startDownload(request: DownloadRequest): Promise<DownloadEntry> {
+/** Queues a download (one per picked section); follow each one's progress by its entry's id. */
+export async function startDownload(request: DownloadRequest): Promise<DownloadEntry[]> {
   if (inTauri) return invoke("start_download", { request });
+  const links = request.sections.length > 0 ? request.sections : [request.url];
+  return links.map((url) => fakeStart({ ...request, url }));
+}
+
+function fakeStart(request: DownloadRequest): DownloadEntry {
   const id = ++fakeJobId;
-  const kind = fakeLinkKind(request.url);
+  const linkKind = fakeLinkKind(request.url);
+  const kind = linkKind === "channel" ? "playlist" : linkKind;
   const preset = fakePresets.find((p) => p.id === request.preset)?.name ?? request.preset;
   const entry: DownloadEntry = {
     id,
     url: request.url,
-    title: { video: "Me at the zoo", playlist: "Pygame Programming Tutorials", profile: "bsky.app" }[kind],
+    title: {
+      video: "Me at the zoo",
+      playlist: "Pygame Programming Tutorials",
+      channel: "GDULA - Videos",
+      profile: "bsky.app",
+    }[linkKind],
     preset: kind === "profile" ? "Original files" : preset,
     state: "queued",
     thumbnail: fakeThumbnail,
@@ -459,9 +558,23 @@ export async function startDownload(request: DownloadRequest): Promise<DownloadE
   return entry;
 }
 
-/** This session's downloads. */
+/** The kept downloads, oldest first. */
 export async function downloads(): Promise<DownloadEntry[]> {
   return inTauri ? invoke("downloads") : fakeDownloads;
+}
+
+/** Removes a finished download from the list (its files stay); returns the list. */
+export async function removeDownload(id: number): Promise<DownloadEntry[]> {
+  if (inTauri) return invoke("remove_download", { id });
+  fakeDownloads = fakeDownloads.filter((d) => d.id !== id);
+  return fakeDownloads;
+}
+
+/** Removes every finished download from the list (their files stay); returns what's left. */
+export async function clearDownloads(): Promise<DownloadEntry[]> {
+  if (inTauri) return invoke("clear_downloads");
+  fakeDownloads = fakeDownloads.filter((d) => d.state === "queued" || d.state === "running");
+  return fakeDownloads;
 }
 
 // ── Grab ──────────────────────────────────
@@ -616,7 +729,20 @@ export async function galleryPage(query: GalleryQuery): Promise<GalleryPage> {
         return b.downloadedAt - a.downloadedAt;
     }
   });
-  return { items: sorted.slice(query.offset, query.offset + query.limit), total: sorted.length };
+  const present = fakeGallery.filter((item) => !fakeTrashed.has(item.path));
+  return {
+    items: sorted.slice(query.offset, query.offset + query.limit),
+    total: sorted.length,
+    kinds: [...new Set(present.map((item) => item.kind))].sort(),
+    sites: [...new Set(present.flatMap((item) => (item.site ? [item.site] : [])))].sort(),
+  };
+}
+
+/** Calls `handler` whenever something in the library folder changes; returns a function that stops it. */
+export function onLibraryChanged(handler: () => void): () => void {
+  if (!inTauri) return () => {};
+  const unlisten = listen("library-changed", () => handler());
+  return () => void unlisten.then((stop) => stop());
 }
 
 /** A library file's thumbnail as a `data:` URL; `null` when it has no picture. */

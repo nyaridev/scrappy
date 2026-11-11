@@ -4,6 +4,7 @@
 //! thumbnails.
 
 mod download;
+mod download_list;
 mod downloads;
 mod engine;
 mod gallery;
@@ -17,5 +18,5 @@ mod thumbnail;
 
 pub use downloads::{DownloadEntry, DownloadRequest, DownloadState, Downloads, SaveRequest, SendError};
 pub use presets::{PresetInfo, presets};
-pub use probe::Probe;
+pub use probe::{ListEntry, Probe, Section};
 pub use thumbnail::Thumbnails;

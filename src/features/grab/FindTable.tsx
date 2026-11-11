@@ -3,11 +3,11 @@
 
 import { Badge, DataTable, type DataTableColumn, Icon, ProgressBar, Tooltip } from "iro-ui";
 import { AlertCircleIcon, CheckCircleIcon } from "iro-ui/icons";
+import { memo } from "react";
 import { formatBytes } from "../../lib/format";
-import type { DownloadEntry } from "../../lib/types/DownloadEntry";
 import type { Find } from "../../lib/types/Find";
-import type { JobProgress } from "../../lib/types/JobProgress";
 import type { Picked } from "../../lib/types/Picked";
+import { useDownload } from "../download/useDownloads";
 import { FIND_KINDS } from "./findKinds";
 
 // ── Constants ─────────────────────────────
@@ -17,24 +17,14 @@ const KIND_ORDER = Object.keys(FIND_KINDS);
 interface Props {
   finds: Find[];
   picked: Record<string, Picked>;
-  entries: DownloadEntry[];
-  progress: Record<number, JobProgress>;
   selected: string[];
   onSelectedChange: (urls: string[]) => void;
 }
 
 // ── Private helpers ───────────────────────
-function Status({
-  find,
-  pick,
-  entry,
-  report,
-}: {
-  find: Find;
-  pick?: Picked;
-  entry?: DownloadEntry;
-  report?: JobProgress;
-}) {
+/** How a picked find's download is doing. It reads its own download, so it alone redraws as that one moves. */
+function Status({ find, pick }: { find: Find; pick?: Picked }) {
+  const { entry, report } = useDownload(pick?.id);
   if (!pick) return null;
   const error = pick.error ?? (entry?.state === "failed" ? (entry.error ?? "Failed") : null);
   if (error) {
@@ -62,8 +52,8 @@ function Status({
 }
 
 // ── Public API ────────────────────────────
-/** The finds table. */
-export function FindTable({ finds, picked, entries, progress, selected, onSelectedChange }: Props) {
+/** The finds table. It redraws only when the finds, picks or selection change, not as downloads move. */
+export const FindTable = memo(function FindTable({ finds, picked, selected, onSelectedChange }: Props) {
   const columns: DataTableColumn<Find>[] = [
     {
       id: "kind",
@@ -101,12 +91,7 @@ export function FindTable({ finds, picked, entries, progress, selected, onSelect
       id: "status",
       header: "Download",
       width: "calc(var(--iro-space-6) * 6)",
-      cell: (find) => {
-        const pick = picked[find.url];
-        const entry = pick?.id != null ? entries.find((e) => e.id === pick.id) : undefined;
-        const report = pick?.id != null ? progress[pick.id] : undefined;
-        return <Status find={find} pick={pick} entry={entry} report={report} />;
-      },
+      cell: (find) => <Status find={find} pick={picked[find.url]} />,
     },
   ];
   return (
@@ -124,4 +109,4 @@ export function FindTable({ finds, picked, entries, progress, selected, onSelect
       empty="Nothing of this type."
     />
   );
-}
+});

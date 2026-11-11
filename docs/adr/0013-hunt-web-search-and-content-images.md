@@ -71,3 +71,6 @@ are part of each page's content, on almost any website, with a switch for each k
   is saved once.
 - The built-in packs are `general`, `games`, `art` and `people`; a user's pack file with the same name replaces one.
 - The duplicate panel moved to `src/components/` so Hunt can scan its own folder with it.
+- After the first real use: "Full-size links" on wikis point at `File:Cat.png` pages, which answer with HTML. A media
+  save (image, video, audio) now refuses a web page before reading it, an image takes its extension from the type
+  the server sends, and a name skips filler at the end of an address (`…/Cat.png/revision/latest` → `Cat`).

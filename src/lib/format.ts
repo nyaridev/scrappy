@@ -49,3 +49,9 @@ export function formatDay(day: string): string {
 export function formatCount(count: number, noun: string, more = false): string {
   return `${count}${more ? "+" : ""} ${noun}${count === 1 && !more ? "" : "s"}`;
 }
+
+/** `18000` → `"18K views"`, `1` → `"1 view"`. */
+export function formatViews(views: number): string {
+  const short = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(views);
+  return `${short} ${views === 1 ? "view" : "views"}`;
+}

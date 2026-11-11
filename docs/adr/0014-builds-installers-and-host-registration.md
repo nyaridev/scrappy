@@ -58,3 +58,5 @@ browsers installed later.
 - `bridge/register.rs` holds the browser list and extension IDs, as `scripts/register-host.mjs` does; Windows writes
   through `winreg` (HKCU only, no admin). Connected means the browser's manifest names this app's host, so a moved
   portable app shows as not connected until it's connected again.
+- `build.bat` makes the same Windows release locally (installer, portable app and zip, extension zips) into
+  `release\`; a Windows PC can't build the macOS and Linux ones, which come from the workflow.

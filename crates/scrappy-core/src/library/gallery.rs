@@ -1,25 +1,29 @@
-//! Gallery: the catalog one page at a time for the Gallery view, filtered by kind, site and a search, sorted by date,
-//! size or name, with files that are gone from disk marked, and a picture whole for the lightbox (ADR-0004).
+//! Gallery: the library folder's files one page at a time for the Gallery view, filtered by kind, site and a search,
+//! sorted by date, size or name, and a picture whole for the lightbox. The folder says what's there; the catalog adds
+//! what it knows of each file (ADR-0015).
 
 // ── Imports ───────────────────────────────
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use rusqlite::{params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::catalog;
+use super::disk::{Disk, DiskFile};
 use super::history::locate;
 
 // ── Constants ─────────────────────────────
-/// The most files one page holds.
-const MAX_PAGE: u32 = 200;
-/// The file name from a `/`-separated path: `rtrim` with the name's own characters strips it down to the folder, and
-/// `replace` takes that folder off. SQLite has no basename function.
-const NAME: &str = "replace(path, rtrim(path, replace(path, '/', '')), '')";
+/// The most files one page holds (a reload asks for every row the window shows).
+const MAX_PAGE: u32 = 1000;
+/// A file's kind by its extension, when the catalog doesn't know it.
+const VIDEO: &[&str] = &["mp4", "mkv", "webm", "mov", "avi", "m4v", "flv", "ts", "wmv"];
+const AUDIO: &[&str] = &["mp3", "m4a", "opus", "ogg", "flac", "wav", "aac", "wma"];
+const IMAGE: &[&str] =
+    &["jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "svg", "tif", "tiff", "heic", "heif", "jxl"];
 /// Pictures the window can show, by extension; other images open in their app.
 const PICTURES: &[(&str, &str)] = &[
     ("jpg", "image/jpeg"),
@@ -75,20 +79,29 @@ pub struct GalleryItem {
     pub bytes: u64,
     /// Seconds.
     pub duration: Option<f64>,
-    /// Unix seconds.
+    /// When it was downloaded, or changed on disk when the catalog doesn't know it. Unix seconds.
     #[ts(type = "number")]
     pub downloaded_at: i64,
-    /// The file is no longer on disk.
-    pub missing: bool,
 }
 
-/// A page of files and how many match in all.
+/// A page of files, how many match in all, and the kinds and sites the folder holds (for the filters).
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GalleryPage {
     pub items: Vec<GalleryItem>,
     pub total: u32,
+    pub kinds: Vec<String>,
+    pub sites: Vec<String>,
+}
+
+/// What the catalog knows of a file.
+struct Known {
+    kind: String,
+    site: Option<String>,
+    user: Option<String>,
+    duration: Option<f64>,
+    downloaded_at: i64,
 }
 
 // ── Private helpers ───────────────────────
@@ -96,67 +109,83 @@ fn error(e: rusqlite::Error) -> String {
     format!("Can't read the library catalog: {e}")
 }
 
-/// `term` as a `LIKE` pattern that matches it literally.
-fn like(term: &str) -> String {
-    let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    format!("%{escaped}%")
-}
-
-// ── Public API ────────────────────────────
-/// The page of the library at `root` that `query` asks for.
-pub fn page(root: &Path, query: &GalleryQuery) -> Result<GalleryPage, String> {
+/// What the catalog knows, by path.
+fn known(root: &Path) -> Result<HashMap<String, Known>, String> {
     let connection = catalog::open(root)?;
-    let mut conditions = Vec::new();
-    let mut values: Vec<Value> = Vec::new();
-    if let Some(kind) = query.kind.as_ref().filter(|kind| !kind.is_empty()) {
-        conditions.push("kind = ?");
-        values.push(Value::Text(kind.clone()));
-    }
-    if let Some(site) = query.site.as_ref().filter(|site| !site.is_empty()) {
-        conditions.push("site = ?");
-        values.push(Value::Text(site.clone()));
-    }
-    if let Some(search) = query.search.as_deref().map(str::trim).filter(|search| !search.is_empty()) {
-        conditions.push("path LIKE ? ESCAPE '\\'");
-        values.push(Value::Text(like(search)));
-    }
-    let filter = if conditions.is_empty() { String::new() } else { format!("WHERE {}", conditions.join(" AND ")) };
-    let order = match query.sort {
-        GallerySort::Newest => "downloaded_at DESC, id DESC".to_string(),
-        GallerySort::Oldest => "downloaded_at, id".to_string(),
-        GallerySort::Largest => "size_bytes DESC, id DESC".to_string(),
-        GallerySort::Name => format!("{NAME} COLLATE NOCASE, id"),
-    };
-
-    let total: i64 = connection
-        .query_row(&format!("SELECT COUNT(*) FROM downloads {filter}"), params_from_iter(&values), |row| row.get(0))
+    let mut statement = connection
+        .prepare("SELECT path, kind, site, user, duration_secs, downloaded_at FROM downloads")
         .map_err(error)?;
-    // `filter` and `order` are built from this file's text only; every value is a parameter.
-    let sql = format!(
-        "SELECT path, kind, site, user, size_bytes, duration_secs, downloaded_at FROM downloads {filter}
-         ORDER BY {order} LIMIT ? OFFSET ?"
-    );
-    values.push(Value::Integer(i64::from(query.limit.min(MAX_PAGE))));
-    values.push(Value::Integer(i64::from(query.offset)));
-    let mut statement = connection.prepare(&sql).map_err(error)?;
     let rows = statement
-        .query_map(params_from_iter(&values), |row| {
-            let path: String = row.get(0)?;
-            Ok(GalleryItem {
-                name: path.rsplit('/').next().unwrap_or(&path).to_string(),
-                missing: !root.join(&path).is_file(),
-                path,
+        .query_map([], |row| {
+            let known = Known {
                 kind: row.get(1)?,
                 site: row.get(2)?,
                 user: row.get(3)?,
-                bytes: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
-                duration: row.get(5)?,
-                downloaded_at: row.get(6)?,
-            })
+                duration: row.get(4)?,
+                downloaded_at: row.get(5)?,
+            };
+            Ok((row.get::<_, String>(0)?, known))
         })
         .map_err(error)?;
-    let items = rows.collect::<Result<_, _>>().map_err(error)?;
-    Ok(GalleryPage { items, total: u32::try_from(total).unwrap_or(u32::MAX) })
+    rows.collect::<Result<_, _>>().map_err(error)
+}
+
+/// A file's kind from its extension: a mirror's start page or saved page is a `site`.
+fn kind_of(path: &str) -> &'static str {
+    let ext = path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        ext if VIDEO.contains(&ext) => "video",
+        ext if AUDIO.contains(&ext) => "audio",
+        ext if IMAGE.contains(&ext) => "image",
+        "html" if path.starts_with("Sites/") => "site",
+        _ => "file",
+    }
+}
+
+fn item(file: &DiskFile, known: Option<&Known>) -> GalleryItem {
+    GalleryItem {
+        name: file.path.rsplit('/').next().unwrap_or(&file.path).to_string(),
+        path: file.path.clone(),
+        kind: known.map_or_else(|| kind_of(&file.path).to_string(), |known| known.kind.clone()),
+        site: known.and_then(|known| known.site.clone()),
+        user: known.and_then(|known| known.user.clone()),
+        bytes: file.bytes,
+        duration: known.and_then(|known| known.duration),
+        downloaded_at: known.map_or(file.modified, |known| known.downloaded_at),
+    }
+}
+
+// ── Public API ────────────────────────────
+/// The page of the library at `root` that `query` asks for, from the files `disk` finds there.
+pub fn page(root: &Path, disk: &Disk, query: &GalleryQuery) -> Result<GalleryPage, String> {
+    let files = disk.files(root)?;
+    let known = known(root)?;
+    let all: Vec<GalleryItem> = files.iter().map(|file| item(file, known.get(&file.path))).collect();
+    let kinds: BTreeSet<String> = all.iter().map(|item| item.kind.clone()).collect();
+    let sites: BTreeSet<String> = all.iter().filter_map(|item| item.site.clone()).collect();
+
+    let kind = query.kind.as_deref().filter(|kind| !kind.is_empty());
+    let site = query.site.as_deref().filter(|site| !site.is_empty());
+    let search = query.search.as_deref().map(|search| search.trim().to_lowercase()).filter(|search| !search.is_empty());
+    let mut items: Vec<GalleryItem> = all
+        .into_iter()
+        .filter(|item| kind.is_none_or(|kind| item.kind == kind))
+        .filter(|item| site.is_none_or(|site| item.site.as_deref() == Some(site)))
+        .filter(|item| search.as_deref().is_none_or(|search| item.path.to_lowercase().contains(search)))
+        .collect();
+    match query.sort {
+        GallerySort::Newest => {
+            items.sort_by(|a, b| b.downloaded_at.cmp(&a.downloaded_at).then_with(|| a.path.cmp(&b.path)))
+        }
+        GallerySort::Oldest => {
+            items.sort_by(|a, b| a.downloaded_at.cmp(&b.downloaded_at).then_with(|| a.path.cmp(&b.path)))
+        }
+        GallerySort::Largest => items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path))),
+        GallerySort::Name => items.sort_by_cached_key(|item| (item.name.to_lowercase(), item.path.clone())),
+    }
+    let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
+    let items = items.into_iter().skip(query.offset as usize).take(query.limit.min(MAX_PAGE) as usize).collect();
+    Ok(GalleryPage { items, total, kinds: kinds.into_iter().collect(), sites: sites.into_iter().collect() })
 }
 
 /// The library picture at `path` as a `data:` URL, for the lightbox. `None` for a file the window can't show (not a
@@ -176,7 +205,9 @@ pub fn picture(root: &Path, path: &str) -> Result<Option<String>, String> {
 mod tests {
     use super::{GalleryQuery, GallerySort, page, picture};
     use crate::library::catalog::{self, Record};
+    use crate::library::disk::Disk;
     use std::fs;
+    use std::sync::Arc;
 
     fn add(root: &std::path::Path, path: &str, kind: &'static str, site: &str, size: u64) {
         let record = Record {
@@ -197,37 +228,74 @@ mod tests {
         GalleryQuery { kind: None, site: None, search: None, sort, offset: 0, limit: 50 }
     }
 
-    fn names(root: &std::path::Path, query: &GalleryQuery) -> Vec<String> {
-        page(root, query).unwrap().items.into_iter().map(|item| item.name).collect()
-    }
-
     #[test]
-    fn filters_sorts_and_pages() {
+    fn shows_the_folder_with_what_the_catalog_knows() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join(".scrappy")).unwrap();
+        fs::create_dir_all(root.join("Videos/b")).unwrap();
         fs::create_dir_all(root.join("Images/a")).unwrap();
-        fs::write(root.join("Images/a/zebra.jpg"), "x").unwrap();
+        fs::write(root.join("Images/a/zebra.jpg"), "x".repeat(300)).unwrap();
+        fs::write(root.join("Videos/b/Apple 100%.mp4"), "x".repeat(900)).unwrap();
+        fs::write(root.join("Videos/b/mango_1.mp4"), "x".repeat(100)).unwrap();
+        fs::write(root.join("Videos/b/added by hand.mkv"), "x").unwrap();
         add(root, "Images/a/zebra.jpg", "image", "a", 300);
-        add(root, "Videos/b/Apple 100%.mp4", "video", "b", 900);
+        add(root, "Videos/b/Apple 100%.mp4", "social", "b", 900);
         add(root, "Videos/b/mango_1.mp4", "video", "b", 100);
+        // In the catalog, but deleted: not shown.
+        add(root, "Videos/b/gone.mp4", "video", "b", 50);
+        let disk = Disk::new(Arc::new(|| {}));
+        let names = |query: &GalleryQuery| {
+            page(root, &disk, query)
+                .unwrap()
+                .items
+                .into_iter()
+                .map(|item| item.name)
+                .collect::<Vec<_>>()
+        };
 
-        assert_eq!(names(root, &query(GallerySort::Newest)), ["mango_1.mp4", "Apple 100%.mp4", "zebra.jpg"]);
-        assert_eq!(names(root, &query(GallerySort::Largest))[0], "Apple 100%.mp4");
-        assert_eq!(names(root, &query(GallerySort::Name)), ["Apple 100%.mp4", "mango_1.mp4", "zebra.jpg"]);
+        assert_eq!(
+            names(&query(GallerySort::Name)),
+            [
+                "added by hand.mkv",
+                "Apple 100%.mp4",
+                "mango_1.mp4",
+                "zebra.jpg"
+            ]
+        );
+        assert_eq!(names(&query(GallerySort::Largest))[0], "Apple 100%.mp4");
+        let videos = GalleryQuery {
+            kind: Some("video".into()),
+            ..query(GallerySort::Name)
+        };
+        assert_eq!(
+            names(&videos),
+            ["added by hand.mkv", "mango_1.mp4"],
+            "the catalog's kind wins (social)"
+        );
+        let percent = GalleryQuery {
+            search: Some("100%".into()),
+            ..query(GallerySort::Name)
+        };
+        assert_eq!(names(&percent), ["Apple 100%.mp4"]);
+        let site = GalleryQuery {
+            site: Some("b".into()),
+            ..query(GallerySort::Name)
+        };
+        assert_eq!(names(&site), ["Apple 100%.mp4", "mango_1.mp4"]);
 
-        let videos = GalleryQuery { kind: Some("video".into()), ..query(GallerySort::Oldest) };
-        assert_eq!(names(root, &videos), ["Apple 100%.mp4", "mango_1.mp4"]);
-        let percent = GalleryQuery { search: Some("100%".into()), ..query(GallerySort::Newest) };
-        assert_eq!(names(root, &percent), ["Apple 100%.mp4"]);
-        let underscore = GalleryQuery { search: Some("o_".into()), ..query(GallerySort::Newest) };
-        assert_eq!(names(root, &underscore), ["mango_1.mp4"]);
-
-        let second = GalleryQuery { offset: 1, limit: 1, ..query(GallerySort::Newest) };
-        let found = page(root, &second).unwrap();
-        assert_eq!((found.total, found.items.len(), found.items[0].name.as_str()), (3, 1, "Apple 100%.mp4"));
-        let all = page(root, &query(GallerySort::Name)).unwrap().items;
-        assert_eq!(all.iter().map(|item| item.missing).collect::<Vec<_>>(), [true, true, false]);
+        let second = GalleryQuery {
+            offset: 1,
+            limit: 1,
+            ..query(GallerySort::Name)
+        };
+        let found = page(root, &disk, &second).unwrap();
+        assert_eq!(
+            (found.total, found.items.len(), found.items[0].name.as_str()),
+            (4, 1, "Apple 100%.mp4")
+        );
+        assert_eq!(found.kinds, ["image", "social", "video"]);
+        assert_eq!(found.sites, ["a", "b"]);
     }
 
     #[test]

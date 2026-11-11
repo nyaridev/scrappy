@@ -1,13 +1,12 @@
-// GalleryView: everything in the library as a grid of thumbnails: search, filter by type and site, sort, and more rows
-// as you scroll. A picture opens large in a lightbox; other files open in their app. "Find duplicates" swaps the grid
+// GalleryView: everything in the library folder as a grid of thumbnails, updated as the folder changes: search, filter
+// by type and site, sort, and more rows as you scroll. A picture opens large in a lightbox; other files open in their app. "Find duplicates" swaps the grid
 // for the duplicate finder.
 
 import { Button, EmptyState, Icon, Lightbox, Select, Spinner, TextField, toast } from "iro-ui";
 import { DuplicateIcon, ImagesIcon, SearchIcon } from "iro-ui/icons";
 import { useEffect, useRef, useState } from "react";
-import { useCached } from "../../app/useCached";
 import { DuplicatesPanel } from "../../components/DuplicatesPanel";
-import { libraryStats, openFile, picture } from "../../lib/backend";
+import { openFile, picture } from "../../lib/backend";
 import { formatCount } from "../../lib/format";
 import { kindOf } from "../../lib/kinds";
 import type { GalleryItem } from "../../lib/types/GalleryItem";
@@ -29,7 +28,6 @@ const SEARCH_DELAY_MS = 250;
 // ── Public API ────────────────────────────
 /** Gallery */
 export function GalleryView() {
-  const [stats] = useCached("libraryStats", libraryStats);
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState(ALL);
@@ -38,7 +36,7 @@ export function GalleryView() {
   const [shown, setShown] = useState<{ src: string; alt: string } | null>(null);
   const [finding, setFinding] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  const { items, total, loading, error, loadMore, reload } = useGallery({
+  const { items, total, kinds, sites, loading, error, loadMore, reload } = useGallery({
     kind: kind === ALL ? null : kind,
     site: site === ALL ? null : site,
     search,
@@ -73,12 +71,9 @@ export function GalleryView() {
 
   const kindOptions = [
     { value: ALL, label: "All types" },
-    ...(stats?.kinds ?? []).map((tally) => ({ value: tally.name, label: kindOf(tally.name).label })),
+    ...kinds.map((name) => ({ value: name, label: kindOf(name).label })),
   ];
-  const siteOptions = [
-    { value: ALL, label: "All sites" },
-    ...(stats?.sites ?? []).map((tally) => ({ value: tally.name, label: tally.name })),
-  ];
+  const siteOptions = [{ value: ALL, label: "All sites" }, ...sites.map((name) => ({ value: name, label: name }))];
   const filtered = search !== "" || kind !== ALL || site !== ALL;
 
   if (finding) {

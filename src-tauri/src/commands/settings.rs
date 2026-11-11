@@ -12,19 +12,19 @@ pub fn get_settings(settings: State<Store>) -> Settings {
 }
 
 /// Saves a new look and returns the settings.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_look(settings: State<Store>, look: Look) -> Result<Settings, String> {
     settings.set_look(look)
 }
 
 /// The sites whose sign-in is remembered.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn signed_in_sites(vault: State<Vault>) -> Result<Vec<RememberedSite>, String> {
     vault.sites()
 }
 
 /// Forgets a site's sign-in.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn forget_site(vault: State<Vault>, site: String) -> Result<(), String> {
     vault.forget(&site)
 }

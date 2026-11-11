@@ -2,7 +2,7 @@
 import type { DownloadState } from "./DownloadState";
 
 /**
- * One download in this session's list. Progress arrives as job events with the same id.
+ * One download in the list. Progress arrives as job events with the same id.
  */
 export type DownloadEntry = { id: number, url: string, title: string, 
 /**

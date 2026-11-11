@@ -12,6 +12,7 @@ use scrappy_core::bridge::{self, Bridge};
 use scrappy_core::dedupe::Duplicates;
 use scrappy_core::grab::Inbox;
 use scrappy_core::jobs::Jobs;
+use scrappy_core::library::Disk;
 use scrappy_core::media::{Downloads, Thumbnails};
 use scrappy_core::settings::Store;
 use scrappy_core::tools::Toolbox;
@@ -37,8 +38,9 @@ pub fn run() {
                 warm.update_yt_dlp().await;
             });
             let vault = Vault::open(&app.path().app_data_dir()?, KeySource::Keychain);
-            let downloads = Downloads::new(toolbox.clone(), vault.clone());
+            let downloads = Downloads::new(toolbox.clone(), vault.clone()).kept_in(&app.path().app_data_dir()?);
             let jobs = Jobs::new(events::job_reporter(app.handle().clone()));
+            jobs.continue_after(downloads.last_id());
             let handle = app.handle().clone();
             // The window takes a handed page with `handed_page` when it starts and whenever it gains focus.
             let inbox = Inbox::new(Arc::new(move || window::bring_forward(&handle)));
@@ -57,6 +59,7 @@ pub fn run() {
             app.manage(vault);
             app.manage(inbox);
             app.manage(Duplicates::default());
+            app.manage(Disk::new(events::library_watcher(app.handle().clone())));
             app.manage(Thumbnails::new(toolbox.clone()));
             app.manage(toolbox);
             window::open(app, frame)?;
@@ -83,9 +86,12 @@ pub fn run() {
             tools::install_tools,
             jobs::cancel_job,
             media::probe_url,
+            media::entry_thumbnail,
             media::presets,
             media::start_download,
             media::downloads,
+            media::remove_download,
+            media::clear_downloads,
             grab::scan_page,
             grab::grab_finds,
             grab::handed_page,

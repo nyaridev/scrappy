@@ -16,7 +16,7 @@ results, and reports progress through a callback the shell passes in.
 | `library` | the root folder, its layout, path templates, the catalog (`.scrappy/library.db`) and what it says was downloaded | 0004 |
 | `jobs` | the queue, cancel flags, concurrency, progress callbacks | 0010 |
 | `tools` | finding, downloading, checking and updating yt-dlp, Deno, gallery-dl, ffmpeg, ffprobe; finding the installed browser | 0002, 0012 |
-| `media` | probing and downloading with yt-dlp and gallery-dl, encoding with ffmpeg, presets, the Gallery's thumbnails | 0002, 0003 |
+| `media` | probing and downloading with yt-dlp and gallery-dl, encoding with ffmpeg, presets, the Gallery's thumbnails, the Download list (`downloads.db`) | 0002, 0003, 0016 |
 | `grab` | finding a page's media (extension finds, CDP deep scan), classifying, the handed-page inbox, saving picks through `media` | 0007 |
 | `crawl` | crawling with limits, offline mirrors, single-page saves | 0008 |
 | `hunt` | source packs, the web search, the content-image finder, saving what it finds | 0013 |

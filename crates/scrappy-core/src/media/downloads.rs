@@ -1,11 +1,11 @@
-//! Downloads: this session's download list, the links probed so far (so a download reuses the probe instead of
-//! asking the site again), the queue downloads wait in (ADR-0010), and the sign-ins they use: one given for this
-//! download, else the site's remembered one (ADR-0005). A link becomes one video, a playlist or a gallery-dl
-//! collection, as its route and probe say.
+//! Downloads: the download list (kept on disk when the app asks, ADR-0016), the links probed so far (so a download
+//! reuses the probe instead of asking the site again), the queue downloads wait in (ADR-0010), and the sign-ins they
+//! use: one given for this download, else the site's remembered one (ADR-0005). A link becomes one video, a playlist
+//! or a gallery-dl collection, as its route and probe say; a channel's picked sections become one download each.
 
 // ── Imports ───────────────────────────────
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::download::{self, Order, Saved, Taken};
+use super::download_list::DownloadList;
 use super::engine;
 use super::gallery::{self, GalleryOrder};
 use super::file::{self, FileOrder, TOO_SMALL};
@@ -35,6 +36,8 @@ const FILES_PRESET: &str = "Original files";
 const FILE_PRESET: &str = "Original file";
 /// How many files of a playlist or profile a send from the extension saves.
 const EXTENSION_LIMIT: u32 = 50;
+/// How many listed videos' thumbnails are fetched at once.
+const PREVIEWS_AT_ONCE: usize = 6;
 /// A probe's stream links expire after some hours; an older probe is done again.
 const PROBE_KEPT: Duration = Duration::from_secs(60 * 60);
 
@@ -49,12 +52,18 @@ pub struct DownloadRequest {
     pub preset: String,
     /// The highest video height to take; `None` for the best.
     pub max_height: Option<u32>,
-    /// For a playlist or profile: save only its first this many files; `None` for all.
+    /// For a playlist or profile: save only its first this many files (of each section); `None` for all.
     pub limit: Option<u32>,
+    /// The probe's sections to download, one download each; empty for the whole link.
+    #[serde(default)]
+    pub sections: Vec<String>,
+    /// Links of a list's videos (from the probe's entries) to leave out.
+    #[serde(default)]
+    pub skip: Vec<String>,
 }
 
 /// Where a download is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum DownloadState {
@@ -65,8 +74,8 @@ pub enum DownloadState {
     Cancelled,
 }
 
-/// One download in this session's list. Progress arrives as job events with the same id.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+/// One download in the list. Progress arrives as job events with the same id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct DownloadEntry {
@@ -122,18 +131,28 @@ struct Probed {
     probe: Probe,
 }
 
-/// The downloads of this session and what they share.
+/// The downloads and what they share.
 #[derive(Clone)]
 pub struct Downloads {
     toolbox: Toolbox,
     vault: Vault,
     queue: Queue,
     entries: Arc<Mutex<Vec<DownloadEntry>>>,
+    list: DownloadList,
     probed: Arc<Mutex<HashMap<String, Probed>>>,
+    /// Listed videos' thumbnail links, by video link, and the pictures fetched so far.
+    previews: Arc<Mutex<HashMap<String, String>>>,
+    pictures: Arc<Mutex<HashMap<String, Option<String>>>>,
+    fetching: Arc<tokio::sync::Semaphore>,
     taken: Taken,
 }
 
 // ── Private helpers ───────────────────────
+/// Done, failed or stopped: it can leave the list.
+fn finished(entry: &DownloadEntry) -> bool {
+    !matches!(entry.state, DownloadState::Queued | DownloadState::Running)
+}
+
 impl From<String> for SendError {
     fn from(message: String) -> Self {
         Self::Failed(message)
@@ -175,9 +194,25 @@ impl Downloads {
             vault,
             queue: Queue::new(RUNNING_AT_ONCE),
             entries: Arc::default(),
+            list: DownloadList::default(),
             probed: Arc::default(),
+            previews: Arc::default(),
+            pictures: Arc::default(),
+            fetching: Arc::new(tokio::sync::Semaphore::new(PREVIEWS_AT_ONCE)),
             taken: Arc::default(),
         }
+    }
+
+    /// Keeps the list in `dir` from now on, starting with what's kept there.
+    pub fn kept_in(mut self, dir: &Path) -> Self {
+        self.list = DownloadList::open(dir);
+        self.entries = Arc::new(Mutex::new(self.list.load()));
+        self
+    }
+
+    /// The highest id in the list, so new jobs continue after it.
+    pub fn last_id(&self) -> JobId {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).iter().map(|entry| entry.id).max().unwrap_or(0)
     }
 
     /// Reads a link's details for the window, and keeps them for its download. Uses the site's remembered sign-in.
@@ -187,23 +222,62 @@ impl Downloads {
         Ok(self.look_up(&url, &[], cookies.as_deref()).await.map_err(|e| e.message())?.probe)
     }
 
-    /// This session's downloads, oldest first.
+    /// The thumbnail of a video a probe listed, as a `data:` URL; `None` for a link no probe listed, or no picture.
+    pub async fn preview(&self, url: &str) -> Option<String> {
+        if let Some(picture) = self.pictures.lock().unwrap_or_else(PoisonError::into_inner).get(url) {
+            return picture.clone();
+        }
+        let link = self.previews.lock().unwrap_or_else(PoisonError::into_inner).get(url).cloned()?;
+        let _turn = self.fetching.acquire().await.ok()?;
+        let picture = probe::thumbnail(Some(&link)).await;
+        self.pictures.lock().unwrap_or_else(PoisonError::into_inner).insert(url.to_string(), picture.clone());
+        picture
+    }
+
+    /// The downloads, oldest first.
     pub fn list(&self) -> Vec<DownloadEntry> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// Queues a download into the library at `root` and returns its entry at once. Must be called inside a Tokio
-    /// runtime.
+    /// Removes a finished download from the list (its files stay) and returns the list.
+    pub fn remove(&self, id: JobId) -> Result<Vec<DownloadEntry>, String> {
+        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        let index = entries.iter().position(|entry| entry.id == id).ok_or("That download isn't in the list.")?;
+        if !finished(&entries[index]) {
+            return Err("Stop the download first.".into());
+        }
+        entries.remove(index);
+        self.list.remove(&[id]);
+        Ok(entries.clone())
+    }
+
+    /// Removes every finished download from the list (their files stay) and returns what's left.
+    pub fn clear(&self) -> Vec<DownloadEntry> {
+        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        let ids: Vec<JobId> = entries.iter().filter(|entry| finished(entry)).map(|entry| entry.id).collect();
+        entries.retain(|entry| !finished(entry));
+        self.list.remove(&ids);
+        entries.clone()
+    }
+
+    /// Queues a download into the library at `root` (one per picked section) and returns the entries at once. Must
+    /// be called inside a Tokio runtime.
     pub async fn start(
         &self,
         jobs: &Arc<Jobs>,
         root: Option<PathBuf>,
         request: DownloadRequest,
-    ) -> Result<DownloadEntry, String> {
+    ) -> Result<Vec<DownloadEntry>, String> {
         let root = root.ok_or("Set up the library first.")?;
         let preset = presets::find(&request.preset).ok_or("Unknown preset.")?;
         let choice = (preset, request.max_height, request.limit);
-        self.queue_link(jobs, root, &request.url, choice, Vec::new(), None).await.map_err(|e| e.message())
+        let links = if request.sections.is_empty() { vec![request.url] } else { request.sections };
+        let mut started = Vec::new();
+        for link in links {
+            let entry = self.queue_link(jobs, root.clone(), &link, choice, &request.skip, (Vec::new(), None)).await;
+            started.push(entry.map_err(|e| e.message())?);
+        }
+        Ok(started)
     }
 
     /// Queues a link the extension sent, with the default preset, the page's allowed headers and a sign-in given
@@ -217,7 +291,7 @@ impl Downloads {
         cookies: Option<Vec<Cookie>>,
     ) -> Result<DownloadEntry, SendError> {
         let choice = (&presets::PRESETS[0], None, Some(EXTENSION_LIMIT));
-        self.queue_link(jobs, root, url, choice, headers, cookies).await
+        self.queue_link(jobs, root, url, choice, &[], (headers, cookies)).await
     }
 
     /// Queues an image the extension sent; it's saved under `Images/{site}/`, the site taken from `page_url`.
@@ -295,16 +369,16 @@ impl Downloads {
     }
 
     /// Queues a link as the job its probe calls for: one video, a playlist or channel (yt-dlp), or a post or
-    /// profile (gallery-dl). The preset, highest height and file limit come in `choice`; the sign-in is the one
-    /// `given`, else the site's remembered one.
+    /// profile (gallery-dl). The preset, highest height and file limit come in `choice`, a playlist's videos to
+    /// leave out in `skip`; the page's headers come with the sign-in `given`, else the site's remembered one is used.
     async fn queue_link(
         &self,
         jobs: &Arc<Jobs>,
         root: PathBuf,
         url: &str,
         (preset, max_height, limit): (&'static Preset, Option<u32>, Option<u32>),
-        headers: Vec<(String, String)>,
-        given: Option<Vec<Cookie>>,
+        skip: &[String],
+        (headers, given): (Vec<(String, String)>, Option<Vec<Cookie>>),
     ) -> Result<DownloadEntry, SendError> {
         let url = engine::check_url(url)?;
         let cookies = given.or_else(|| self.remembered(&url));
@@ -326,7 +400,10 @@ impl Downloads {
             }));
         }
         if probe.count.is_some() {
-            let order = PlaylistOrder { root, url: url.clone(), preset, max_height, limit, info_json, cookies };
+            let only = probe.entries.iter().any(|entry| skip.contains(&entry.url)).then(|| {
+                probe.entries.iter().filter(|entry| !skip.contains(&entry.url)).map(|entry| entry.url.clone()).collect()
+            });
+            let order = PlaylistOrder { root, url: url.clone(), preset, max_height, limit, only, info_json, cookies };
             return Ok(self.queue(jobs, url, title, preset.name, thumbnail, move |job| async move {
                 playlist::run(&toolbox, order, &job).await.map_err(fail)
             }));
@@ -374,7 +451,14 @@ impl Downloads {
                     .await
                     .map_err(|message| classify(url, message, tried))?;
                 let info = Info::parse(&json)?;
+                self.previews.lock().unwrap_or_else(PoisonError::into_inner).extend(info.previews());
                 let thumbnail = probe::thumbnail(info.thumbnail_url()).await;
+                // A channel's sections come listed inside its listing: kept, so each downloads without a new probe.
+                for (link, json) in probe::section_listings(&json) {
+                    let probe = Info::parse(&json)?.probe(&link, thumbnail.clone());
+                    let probed = Probed { at: Instant::now(), json, probe };
+                    self.probed.lock().unwrap_or_else(PoisonError::into_inner).insert(link, probed);
+                }
                 let probe = info.probe(url, thumbnail);
                 (json, probe)
             }
@@ -436,6 +520,7 @@ impl Downloads {
             skipped: None,
             error: None,
         };
+        self.list.put(&entry);
         entries.push(entry.clone());
         entry
     }
@@ -444,6 +529,7 @@ impl Downloads {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) {
             change(entry);
+            self.list.put(entry);
         }
     }
 }
@@ -505,7 +591,7 @@ mod tests {
         assert_eq!(probe.title, "Me at the zoo");
         assert!(probe.thumbnail.as_deref().is_some_and(|t| t.starts_with("data:image/")));
         for preset in ["editor-mp4", "hevc-mp4", "mp3"] {
-            let request = DownloadRequest { url: url.into(), preset: preset.into(), max_height: Some(240), limit: None };
+            let request = DownloadRequest { url: url.into(), preset: preset.into(), max_height: Some(240), limit: None, sections: Vec::new(), skip: Vec::new() };
             downloads.start(&jobs, Some(root.clone()), request).await.unwrap();
         }
         wait_for(&finished, installs + 3).await;
@@ -519,6 +605,46 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM downloads", [], |row| row.get(0))
             .unwrap();
         assert_eq!(rows, 3);
+    }
+
+    /// Proves a channel's sections are counted one by one, list their videos, and are kept for their downloads.
+    /// Needs `SCRAPPY_TOOLS` (a folder with yt-dlp); run with `cargo test -p scrappy-core -- --ignored counts_a_channels`.
+    #[tokio::test]
+    #[ignore = "asks YouTube for a channel's listing"]
+    async fn counts_a_channels_videos_and_shorts() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = std::env::var("SCRAPPY_TOOLS").expect("SCRAPPY_TOOLS");
+        let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
+        let downloads = Downloads::new(Toolbox::new(tools.into()), vault);
+        let probe = downloads.probe("https://www.youtube.com/@GDULA7").await.unwrap();
+        let counts: Vec<_> = probe.sections.iter().map(|s| (s.title.as_str(), s.count, s.entries.len())).collect();
+        println!("{} {:?} {counts:?}", probe.title, probe.count);
+        assert!(probe.sections.len() >= 2, "{probe:?}");
+        assert_eq!(probe.count, Some(probe.sections.iter().map(|s| s.count).sum()));
+        assert!(probe.sections.iter().all(|s| s.entries.len() == s.count as usize), "{counts:?}");
+        let videos = &probe.sections[0];
+        assert_eq!(videos.title, "Videos");
+        let kept = downloads.probe(&videos.url).await.unwrap();
+        assert_eq!((kept.count, kept.entries.len()), (Some(videos.count), videos.entries.len()));
+        let short = &probe.sections[1].entries[0];
+        assert!(short.tall && !videos.entries[0].tall, "{short:?}");
+        let picture = downloads.preview(&short.url).await.unwrap();
+        assert!(picture.starts_with("data:image/"));
+        assert_eq!(downloads.preview("https://example.com/not-listed").await, None);
+    }
+
+    /// Proves a video link that names a playlist probes as the playlist. Needs `SCRAPPY_TOOLS`, like the test above.
+    #[tokio::test]
+    #[ignore = "asks YouTube for a playlist's listing"]
+    async fn reads_a_video_in_a_playlist_as_the_playlist() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = std::env::var("SCRAPPY_TOOLS").expect("SCRAPPY_TOOLS");
+        let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
+        let downloads = Downloads::new(Toolbox::new(tools.into()), vault);
+        let url = "https://www.youtube.com/watch?v=cvaIgq5j2Q8&list=PL0wqt_um4x0bsdViTJBmnl6KGMoSqxfZy";
+        let probe = downloads.probe(url).await.unwrap();
+        println!("{} {:?} {}", probe.title, probe.count, probe.entries.len());
+        assert!(probe.count.is_some_and(|count| count > 100) && !probe.entries.is_empty(), "{probe:?}");
     }
 
     /// Proves collections: two videos of a playlist, then two files of a Bluesky profile, each twice so the second
@@ -542,7 +668,7 @@ mod tests {
             let probe = downloads.probe(url).await.unwrap();
             assert!(probe.count.is_some_and(|count| count >= 2), "{probe:?}");
             for _ in 0..2 {
-                let request = DownloadRequest { url: url.into(), preset: preset.into(), max_height: None, limit: Some(2) };
+                let request = DownloadRequest { url: url.into(), preset: preset.into(), max_height: None, limit: Some(2), sections: Vec::new(), skip: Vec::new() };
                 downloads.start(&jobs, Some(root.clone()), request).await.unwrap();
                 done += 1;
                 wait_for(&finished, done).await;

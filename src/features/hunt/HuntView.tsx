@@ -16,6 +16,7 @@ import {
 } from "iro-ui";
 import { DuplicateIcon, SearchIcon, StopIcon } from "iro-ui/icons";
 import { useEffect, useState } from "react";
+import { useViewShown } from "../../app/viewShown";
 import { DuplicatesPanel } from "../../components/DuplicatesPanel";
 import { ShowInFolderButton } from "../../components/ShowInFolderButton";
 import { huntPacks } from "../../lib/backend";
@@ -60,6 +61,10 @@ export function HuntView() {
   const [limits, setLimits] = useState<Limits>({ pages: 10, files: 200, minKb: 20 });
   const [duplicates, setDuplicates] = useState(false);
 
+  const shown = useViewShown();
+
+  // Read again each time Hunt shows: packs are files the user may have changed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is there to read again when Hunt shows
   useEffect(() => {
     huntPacks()
       .then((read) => {
@@ -67,7 +72,7 @@ export function HuntView() {
         setPacks(read);
       })
       .catch(() => {});
-  }, []);
+  }, [shown]);
 
   const pack = packs?.packs.find((one) => one.id === packId) ?? packs?.packs[0];
   const picked = sites ?? pack?.sites ?? [];

@@ -8,21 +8,21 @@ rules load from the `CLAUDE.md` files above this folder; this file covers only w
 A desktop app (Windows, macOS, Linux) for Nari. It downloads videos and media from YouTube, X, Instagram, Facebook and
 any other site, finds everything downloadable on a page (including chunked streams), crawls and mirrors sites, hunts
 for images by topic with duplicate removal, and keeps a gallery and stats of it all. A small browser extension sends a
-page's videos and images to the app. Stage: M13 (Hunt) is done; `docs/adr/README.md` tracks the milestones.
+page's videos and images to the app. Stage: M14 (builds and installers) is done; `docs/adr/README.md` tracks the milestones.
 
 ## Commands
 
 | Command | What |
 |---|---|
 | `start-dev.bat` | Opens the app with hot reload (`pnpm tauri dev`), installing packages on the first run |
-| `build.bat` | Builds the portable `release\Scrappy.exe` |
+| `build.bat` | Builds for Windows into `release\`: the installer, the portable app and its zip, and the extension's Chrome and Firefox zips |
 | `git tag vX.Y.Z` + push the tag | Builds the installers on GitHub into a draft release (`.github/workflows/release.yml`) |
 | `pnpm dev` | The window alone in a browser, on fake data (port 4430) |
 | `pnpm check` | Size and boundary checks, tsc (app and extension), Biome, Vitest, `cargo test`, clippy. Must pass before a task is done |
 | `cargo test -p scrappy-core -- --ignored` | Downloads every pinned tool from GitHub (about 300 MB): run it after changing a pin |
 | `pnpm types` | Regenerates `src/lib/types/` and `extension/lib/types/` from the Rust types (ts-rs) |
 | `pnpm format` | Biome format and fix |
-| `pnpm -C extension build` / `build:firefox` | Builds the extension into `extension/.output/` |
+| `pnpm -C extension build` / `build:firefox` | Builds the extension into `extension/.output/` (`zip` / `zip:firefox` for the zips) |
 | `pnpm register-host` | Registers the debug scrappy-host with Chrome, Brave, Edge, Chromium and Firefox (`--remove` undoes it); the app does it from Settings → Browser extension |
 
 Rust builds put their intermediate files in the workspace's `_cache/`; the final binaries land in `target/`.
@@ -38,7 +38,7 @@ Rust builds put their intermediate files in the workspace's `_cache/`; the final
 | `extension/` | The WXT browser extension: a background script and one popup; `lib/types/` is generated |
 | `docs/adr/` | Architecture overview, decisions and milestone tracker |
 | `scripts/` | `check-size.mjs`, `check-boundaries.mjs`, `register-host.mjs` |
-| `assets/brand/` | The README's banners, dark and light |
+| `assets/brand/` | The README's banners, dark and light, and `icon.svg`, the app icon (`pnpm tauri icon assets/brand/icon.svg` makes `src-tauri/icons/`) |
 
 ## Architecture
 

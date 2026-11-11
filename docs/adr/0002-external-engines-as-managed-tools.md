@@ -47,7 +47,9 @@ Deno and ffmpeg on demand; Rust can't load yt-dlp as a library.
 - gallery-dl runs with `--config-ignore` and its options on the command line (`-d`, `--download-archive`,
   `--cookies`, `--range`) instead of a config file written per run. It prints each saved file's path, and `# path`
   for one its archive skipped. Its layout `Social/<site>/<user>/` is ADR-0004's.
-- Playlists and channels: the probe lists them with `--flat-playlist --playlist-items 1-50`; the download runs
+- Every yt-dlp run passes `--no-playlist`; the probe adds `--yes-playlist` for a video link that names a playlist
+  (`watch?v=…&list=PL…`), but not a YouTube Mix (`list=RD…`), which stays the one video.
+- Playlists and channels: the probe lists them with `--flat-playlist --playlist-items 1-1000` (ADR-0016); the download runs
   yt-dlp with `--yes-playlist -i --no-quiet` and counts saved and skipped videos from its output, then checks and
   encodes each one with the preset.
 - Each engine keeps an archive in `.scrappy/` (`gallery-dl.sqlite3`, `yt-dlp-archive.txt`), so a file saved before

@@ -1,7 +1,8 @@
-// SignedInSites: the sites whose browser sign-in Scrappy remembers (shared from the extension), each with Forget.
+// SignedInSites: the sites whose browser sign-in Scrappy remembers (shared from the extension), each with Forget (also on
+// right-click).
 
-import { Button, Icon, SectionTitle, toast } from "iro-ui";
-import { KeyIcon } from "iro-ui/icons";
+import { Button, ContextMenu, Icon, SectionTitle, toast } from "iro-ui";
+import { KeyIcon, TrashIcon } from "iro-ui/icons";
 import { useCached } from "../../app/useCached";
 import { forgetSite, signedInSites } from "../../lib/backend";
 import { formatWhen } from "../../lib/format";
@@ -26,15 +27,27 @@ export function SignedInSites() {
       {sites && sites.length > 0 && (
         <ul className="sites" aria-label="Signed-in sites">
           {sites.map((site) => (
-            <li key={site.site} className="site-row">
-              <span className="site-name">{site.site}</span>
-              <span className="site-detail">
-                {site.cookies} {site.cookies === 1 ? "cookie" : "cookies"} · {formatWhen(site.savedAt)}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => void forget(site.site)}>
-                Forget
-              </Button>
-            </li>
+            <ContextMenu
+              key={site.site}
+              items={[
+                {
+                  label: "Forget",
+                  icon: <Icon icon={TrashIcon} />,
+                  danger: true,
+                  onSelect: () => void forget(site.site),
+                },
+              ]}
+            >
+              <li className="site-row">
+                <span className="site-name">{site.site}</span>
+                <span className="site-detail">
+                  {site.cookies} {site.cookies === 1 ? "cookie" : "cookies"} · {formatWhen(site.savedAt)}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => void forget(site.site)}>
+                  Forget
+                </Button>
+              </li>
+            </ContextMenu>
           ))}
         </ul>
       )}

@@ -3,9 +3,8 @@
 
 import { Button, EmptyState, Field, Icon, IconButton, MultiSegmented, Panel, Spinner, TextField } from "iro-ui";
 import { DownloadIcon, LinkIcon, SearchIcon } from "iro-ui/icons";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FindKind } from "../../lib/types/FindKind";
-import { useDownloads } from "../download/useDownloads";
 import { FindTable } from "./FindTable";
 import { FIND_KINDS } from "./findKinds";
 import { useGrab } from "./useGrab";
@@ -26,7 +25,6 @@ function hostOf(url: string): string {
 /** Grab */
 export function GrabView() {
   const { page, picked, scan, grab } = useGrab();
-  const { entries, progress } = useDownloads();
   const [link, setLink] = useState(page?.url ?? "");
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +46,15 @@ export function GrabView() {
     label: `${FIND_KINDS[kind].label} ${counts[kind]}`,
     icon: <Icon icon={FIND_KINDS[kind].icon} />,
   }));
-  const shown = kinds.length > 0 ? finds.filter((find) => kinds.includes(find.kind)) : finds;
-  const chosen = finds.filter((find) => selected.includes(find.url));
+  // The same list while the finds and type filter stay, so the table (a thousand rows) isn't drawn again.
+  const shown = useMemo(
+    () => (kinds.length > 0 ? finds.filter((find) => kinds.includes(find.kind)) : finds),
+    [finds, kinds],
+  );
+  const chosen = useMemo(() => {
+    const picked = new Set(selected);
+    return finds.filter((find) => picked.has(find.url));
+  }, [finds, selected]);
 
   async function runScan() {
     const url = link.trim();
@@ -144,14 +149,7 @@ export function GrabView() {
                   {chosen.length > 0 ? `Download ${chosen.length}` : "Download"}
                 </Button>
               </div>
-              <FindTable
-                finds={shown}
-                picked={picked}
-                entries={entries}
-                progress={progress}
-                selected={selected}
-                onSelectedChange={setSelected}
-              />
+              <FindTable finds={shown} picked={picked} selected={selected} onSelectedChange={setSelected} />
             </>
           )}
         </Panel>

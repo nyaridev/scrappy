@@ -13,6 +13,14 @@ preset: string,
  */
 maxHeight: number | null, 
 /**
- * For a playlist or profile: save only its first this many files; `None` for all.
+ * For a playlist or profile: save only its first this many files (of each section); `None` for all.
  */
-limit: number | null, };
+limit: number | null, 
+/**
+ * The probe's sections to download, one download each; empty for the whole link.
+ */
+sections: Array<string>, 
+/**
+ * Links of a list's videos (from the probe's entries) to leave out.
+ */
+skip: Array<string>, };

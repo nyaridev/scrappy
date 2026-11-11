@@ -48,6 +48,8 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 | [0012](0012-tool-sources-and-pinning.md) | Tool sources and pinning | Accepted |
 | [0013](0013-hunt-web-search-and-content-images.md) | Hunt: web search and one content-image finder | Accepted |
 | [0014](0014-builds-installers-and-host-registration.md) | Builds, installers and connecting the browsers | Accepted |
+| [0015](0015-gallery-from-the-library-folder.md) | The Gallery shows the library folder, watched live | Accepted |
+| [0016](0016-download-history-and-channel-sections.md) | The Download list is kept; a channel's lists are picked one by one | Accepted |
 
 ## Milestones
 
@@ -67,26 +69,23 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 | M11 | Image crawl with limits | done |
 | M12 | Site mirror | done |
 | M13 | Hunt: web search, content images, source packs | done |
-| M14 | Windows, macOS and Linux builds in CI, installers | in progress |
+| M14 | Windows, macOS and Linux builds in CI, installers | done |
 | M15 | Change the library folder in Settings (another library, or move this one) | planned |
 
-### M14: Windows, macOS and Linux builds in CI, installers
+### M15: Change the library folder in Settings
 
-- [x] 0. ADR-0014 (supersedes ADR-0006's installer registration).
-- [x] 1. A GitHub Actions check on every push and pull request: `pnpm check` on Windows, macOS and Linux (with
-  WebKitGTK and the Secret Service libraries on Linux).
-- [x] 2. A release workflow on a version tag: Tauri builds a Windows installer and the portable `Scrappy.exe`, a
-  macOS disk image (Apple Silicon and Intel), and a Linux AppImage and `.deb`, into a draft GitHub release.
-- [x] 3. `scrappy-host` built and shipped with each app, and a Settings button that registers it with the
-  installed browsers for the installed app (today `pnpm register-host` does it for debug builds).
-- [x] 4. The extension's Chrome and Firefox zips attached to the same release.
-- [ ] 5. Done checks: each workflow runs green once on GitHub.
+- [ ] 1. `library`: use another library folder: checked like first-run setup (a new or empty folder gets the layout,
+  an existing library keeps its catalog); the settings switch to it, and the Gallery's watcher follows.
+- [ ] 2. `library`: move this library to a new folder as a job: copy every file and the catalog, check the copy
+  (file count and sizes), then switch. The old folder stays where it was until the user removes it.
+- [ ] 3. Settings: "Change folder" under Library, with the two choices, the job's progress, and the old folder's path
+  shown after a move.
+- [ ] 4. Done checks.
 
 ### Later
 
 - The extension is tested by its parts (socket, relay, message checks) and a hello through the real host; load it
   in Chrome and Firefox (`pnpm register-host`, then load `extension/.output/`) to try a real send.
-- Pick an app icon; `src-tauri/icons/` still holds the generator's, and the installers use them.
 - Decide Scrappy's own licence before the repo goes public (the external tools are GPL; ADR-0002).
 - macOS: the overlay title bar (header padding, traffic lights) is untested until there's a Mac build (M14).
 - iro-ui 1.0.1: `TextField` lacks `box-sizing: border-box` (its slot-button math assumes it). Fix it there, then
@@ -95,13 +94,13 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 - Linux on ARM and Windows on ARM have no tool downloads yet; they use copies on `PATH`.
 - GPU encoders (NVENC, QSV, AMF, VideoToolbox) for the editor-safe re-encode (ADR-0003), after M3's `libx264`.
 - Downloads: a Retry button for failed ones; YouTube sometimes answers 403 mid-download, which a retry fixes.
-- The Download list lasts one session; the catalog keeps the history (Home, M4).
+- The Download list is kept in `downloads.db` (ADR-0016); gallery-dl profiles don't offer sections yet.
 - Images sent from the extension don't use remembered sign-ins yet (M6).
 - Linux builds need the Secret Service (`libdbus`) for the vault's key; the workflows install it.
 - Releases are unsigned: Windows SmartScreen and macOS Gatekeeper warn on first start (macOS: right-click → Open).
   Signing and notarizing need certificates (ADR-0014, Later).
-- The Check workflow passes on Windows, macOS and Linux; the release workflow runs on the first `v*` tag (M14
-  step 5).
+- Both workflows passed on their first run (v0.1.0 is a draft release). `pnpm/action-setup@v4` runs on a Node.js
+  version GitHub has deprecated; bump it when a newer one is out.
 - A real sign-in flow (send → ask → share → download) is tested by its parts; try it once with a signed-in site
   in Chrome and Firefox.
 - Collections are tested for real on a YouTube playlist and a Bluesky profile (the ignored test in
@@ -109,6 +108,8 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 - A playlist skips a video that fails and goes on; the finished row doesn't say how many failed yet.
 - A send from the extension saves at most the first 50 files of a playlist or profile; the window picks any amount.
 - Grab: `vsd` (ADR-0007's stream fallback) isn't added; add it when a stream turns up that yt-dlp can't read.
+- The Gallery lists the library folder and reloads when it changes (ADR-0015); a network drive may not report
+  changes, so it then updates on the next open.
 - Gallery thumbnails are tested with FFmpeg's test pictures; check them once on a real library (HEIC and AVIF depend
   on the FFmpeg build). `.scrappy/thumbs/` keeps a thumbnail after its file is gone.
 - Duplicate removal: moving to the system trash is tested by its checks only (a real run would fill the trash of

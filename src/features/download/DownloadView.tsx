@@ -1,5 +1,6 @@
-// DownloadView: paste a link, Rust checks it and shows what's there, pick a preset and quality (and for a playlist
-// or profile, how many), download. This session's downloads are listed below.
+// DownloadView: paste a link, Rust checks it (Enter or the arrow) and shows what's there until the next check; pick
+// a preset and quality (for a playlist or profile, how many; for a playlist or channel, which lists and videos),
+// download. The kept downloads are listed below, with Clear all.
 
 import { Button, Field, Icon, IconButton, Panel, Select, TextField } from "iro-ui";
 import { ArrowRightIcon, DownloadIcon, LinkIcon } from "iro-ui/icons";
@@ -7,7 +8,9 @@ import { useState } from "react";
 import { useCached } from "../../app/useCached";
 import { presets, probeUrl } from "../../lib/backend";
 import type { Probe } from "../../lib/types/Probe";
+import type { Section } from "../../lib/types/Section";
 import { DownloadQueue } from "./DownloadQueue";
+import { ListTiles } from "./ListTiles";
 import { ProbeCard } from "./ProbeCard";
 import { useDownloads } from "./useDownloads";
 
@@ -17,10 +20,21 @@ const ALL = "all";
 /** The "First N" choices for a playlist or profile. */
 const AMOUNTS = [10, 25, 50, 100];
 
+// ── Private helpers ───────────────────────
+/** The lists to show as tiles: a channel's sections, or a playlist as one list; none for anything else. */
+function listsOf(probe: Probe | null): Section[] {
+  if (!probe) return [];
+  if (probe.sections.length > 0) return probe.sections;
+  if (probe.files || probe.count == null) return [];
+  return [{ url: probe.url, title: "Videos", count: probe.count, more: probe.more, entries: probe.entries }];
+}
+
 // ── Public API ────────────────────────────
 /** Download */
 export function DownloadView() {
   const [link, setLink] = useState("");
+  // The link as it was checked: Enter downloads while the field still holds it, and checks again once it changes.
+  const [checkedLink, setCheckedLink] = useState("");
   const [probe, setProbe] = useState<Probe | null>(null);
   const [checking, setChecking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -29,20 +43,31 @@ export function DownloadView() {
   const [quality, setQuality] = useState(BEST);
   const [amount, setAmount] = useState(ALL);
   const [starting, setStarting] = useState(false);
-  const { entries, progress, start, cancel } = useDownloads();
+  const [sections, setSections] = useState<string[]>([]);
+  const [skip, setSkip] = useState<string[]>([]);
+  const { entries, progress, start, cancel, remove, clear } = useDownloads();
 
   const preset = allPresets?.find((p) => p.id === presetId) ?? allPresets?.[0] ?? null;
   const qualityOptions = [
     { value: BEST, label: "Best" },
     ...(probe?.heights ?? []).map((height) => ({ value: String(height), label: `${height}p` })),
   ];
-  const count = probe?.count ?? null;
+  const lists = listsOf(probe);
+  const hasSections = (probe?.sections.length ?? 0) > 0;
+  const picked = hasSections ? lists.filter((list) => sections.includes(list.url)) : lists;
+  const skipped = new Set(skip);
+  const count =
+    lists.length > 0
+      ? picked.reduce((sum, list) => sum + list.count - list.entries.filter((e) => skipped.has(e.url)).length, 0)
+      : (probe?.count ?? null);
+  const more = lists.length > 0 ? picked.some((list) => list.more) : probe?.more;
+  const finished = entries.some((entry) => entry.state !== "queued" && entry.state !== "running");
   const amountOptions =
     count == null
       ? []
       : [
-          { value: ALL, label: probe?.more ? "All" : `All ${count}` },
-          ...AMOUNTS.filter((n) => probe?.more || n < count).map((n) => ({ value: String(n), label: `First ${n}` })),
+          { value: ALL, label: more ? "All" : `All ${count}` },
+          ...AMOUNTS.filter((n) => more || n < count).map((n) => ({ value: String(n), label: `First ${n}` })),
         ];
   const downloadLabel = count == null ? "Download" : amount === ALL ? "Download all" : `Download ${amount}`;
 
@@ -53,7 +78,11 @@ export function DownloadView() {
     setLinkError(null);
     setProbe(null);
     try {
-      setProbe(await probeUrl(url));
+      const found = await probeUrl(url);
+      setProbe(found);
+      setCheckedLink(url);
+      setSections(found.sections.map((section) => section.url));
+      setSkip([]);
       setQuality(BEST);
       setAmount(ALL);
     } catch (e) {
@@ -73,6 +102,8 @@ export function DownloadView() {
         preset: preset.id,
         maxHeight: quality === BEST ? null : Number(quality),
         limit: amount === ALL ? null : Number(amount),
+        sections: hasSections ? sections : [],
+        skip,
       });
       setLink("");
       setProbe(null);
@@ -89,12 +120,10 @@ export function DownloadView() {
         <Field label="Link" error={linkError ?? undefined}>
           <TextField
             value={link}
-            onChange={(event) => {
-              setLink(event.target.value);
-              setProbe(null);
-              setLinkError(null);
-            }}
-            onKeyDown={(event) => event.key === "Enter" && void (probe ? download() : check())}
+            onChange={(event) => setLink(event.target.value)}
+            onKeyDown={(event) =>
+              event.key === "Enter" && void (probe && link.trim() === checkedLink ? download() : check())
+            }
             placeholder="https://"
             spellCheck={false}
             autoComplete="off"
@@ -113,10 +142,19 @@ export function DownloadView() {
 
         {probe && (
           <>
-            <ProbeCard probe={probe} />
+            <ProbeCard probe={probe} showItems={lists.length === 0} />
+            {lists.length > 0 && (
+              <ListTiles
+                lists={lists}
+                on={hasSections ? sections : null}
+                onOnChange={setSections}
+                skip={skip}
+                onSkipChange={setSkip}
+              />
+            )}
             <div className="download-options">
               {count != null && (
-                <Field label="Amount">
+                <Field label="Amount" hint={picked.length > 1 ? "Of each list" : undefined}>
                   <Select options={amountOptions} value={amount} onValueChange={(v) => setAmount(v ?? ALL)} />
                 </Field>
               )}
@@ -144,7 +182,7 @@ export function DownloadView() {
                 variant="primary"
                 icon={<Icon icon={DownloadIcon} />}
                 loading={starting}
-                disabled={!preset}
+                disabled={!preset || count === 0}
                 onClick={download}
               >
                 {downloadLabel}
@@ -154,7 +192,16 @@ export function DownloadView() {
         )}
       </Panel>
 
-      {entries.length > 0 && <DownloadQueue entries={entries} progress={progress} onCancel={cancel} />}
+      {entries.length > 0 && (
+        <section className="downloads" aria-label="Downloads">
+          <div className="downloads-head">
+            <Button size="sm" variant="ghost" disabled={!finished} onClick={clear}>
+              Clear all
+            </Button>
+          </div>
+          <DownloadQueue entries={entries} progress={progress} onCancel={cancel} onRemove={remove} />
+        </section>
+      )}
     </div>
   );
 }

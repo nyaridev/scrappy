@@ -278,7 +278,7 @@ mod tests {
         assert!(mirror.join("css/base.css").is_file() && mirror.join("img/bg.png").is_file());
 
         let query = GalleryQuery { kind: Some("site".into()), site: None, search: None, sort: GallerySort::Newest, offset: 0, limit: 10 };
-        let rows = library::page(&root, &query).unwrap();
+        let rows = library::page(&root, &library::Disk::new(Arc::new(|| {})), &query).unwrap();
         assert_eq!(rows.items.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(), ["Sites/127.0.0.1/index.html"]);
     }
 }

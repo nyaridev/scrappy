@@ -12,13 +12,18 @@ paths:
   window forward.
 - `window.rs` builds the main window with the frame `scrappy_core::app::window_frame()` picks (ADR-0011). Windows
   come from Rust, not `tauri.conf.json`.
-- `events.rs` turns core's job reports into the `job-progress` and `job-finished` events.
-- A command that starts a job is `async`: `Jobs::start` needs the Tokio runtime async commands run in.
+- `events.rs` turns core's job reports into the `job-progress` and `job-finished` events, and the library watcher's
+  calls into `library-changed`.
+- A plain `#[tauri::command] pub fn` runs on the window's thread and freezes it while it works. Any command that
+  touches files, the catalog, the network or another process is `#[tauri::command(async)]` (or `async fn`); only
+  instant ones (window controls, reading a value in memory) stay plain. A command that starts a job is `async`:
+  `Jobs::start` needs the Tokio runtime.
 - Commands live in `src/commands/<area>.rs`, one file per view or system, listed in `commands/mod.rs`.
 - A command parses its arguments, makes one `scrappy_core` call and returns the result. Any `if` about behavior
   belongs in core.
 - Long work: the command starts a core job and returns its id. Progress is forwarded as `job-progress`, the result as
-  `job-finished` (ADR-0010). No other event names without an ADR change.
+  `job-finished` (ADR-0010). The library watcher sends `library-changed` (ADR-0015). No other event names without an
+  ADR change.
 - Return types come from core with `ts_rs` exports; the shell defines no types the window sees.
 - Errors go back as `Result<T, String>` with a readable message.
 
@@ -36,6 +41,7 @@ paths:
 ## How to add a command
 
 1. Write the logic in core first, with its tests.
-2. Add `#[tauri::command] pub fn <name>(…)` to `src/commands/<area>.rs` (a new area also goes in `commands/mod.rs`).
+2. Add `#[tauri::command(async)] pub fn <name>(…)` to `src/commands/<area>.rs` (a new area also goes in
+   `commands/mod.rs`).
 3. Register it in `generate_handler!` in `lib.rs`.
 4. Run `pnpm types` if it returns a new type, then add its function to `src/lib/backend.ts` with a fake answer.

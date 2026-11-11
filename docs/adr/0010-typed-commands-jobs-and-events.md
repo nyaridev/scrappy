@@ -1,6 +1,6 @@
 # ADR-0010: Typed commands, jobs and events
 
-**Status:** Accepted
+**Status:** Accepted; ADR-0015 adds the `library-changed` event
 **Date:** 2026-11-10
 
 ## Context
@@ -30,5 +30,8 @@ browser (`pnpm dev`), as in Workstation and PrepKit.
 
 - **Easier:** a Rust type change breaks the TypeScript build instead of the running app.
 - **Harder:** a new type needs `pnpm types` before the UI sees it.
+- Commands that do I/O run off the window's thread (`#[tauri::command(async)]`), and the window applies job events
+  in batches (at most five progress updates and two list reloads a second), so a grab of a thousand files doesn't
+  freeze it.
 - **Later:** a CLI can drive the same jobs and print the same progress.
 - **Rules:** `.claude/rules/architecture/shell.md`, `frontend.md`.

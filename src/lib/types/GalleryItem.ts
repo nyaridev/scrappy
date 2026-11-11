@@ -13,10 +13,6 @@ path: string, name: string, kind: string, site: string | null, user: string | nu
  */
 duration: number | null, 
 /**
- * Unix seconds.
+ * When it was downloaded, or changed on disk when the catalog doesn't know it. Unix seconds.
  */
-downloadedAt: number, 
-/**
- * The file is no longer on disk.
- */
-missing: boolean, };
+downloadedAt: number, };

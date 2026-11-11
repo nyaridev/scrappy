@@ -1,8 +1,8 @@
-//! Media commands: probing a link, the presets, and starting and listing downloads.
+//! Media commands: probing a link, the presets, and starting, listing and removing downloads.
 
 use std::sync::Arc;
 
-use scrappy_core::jobs::Jobs;
+use scrappy_core::jobs::{JobId, Jobs};
 use scrappy_core::media::{self, DownloadEntry, DownloadRequest, Downloads, PresetInfo, Probe};
 use scrappy_core::settings::Store;
 use tauri::State;
@@ -13,25 +13,43 @@ pub async fn probe_url(downloads: State<'_, Downloads>, url: String) -> Result<P
     downloads.probe(&url).await
 }
 
+/// The thumbnail of a video a probe listed, as a `data:` URL.
+#[tauri::command]
+pub async fn entry_thumbnail(downloads: State<'_, Downloads>, url: String) -> Result<Option<String>, String> {
+    Ok(downloads.preview(&url).await)
+}
+
 /// The output presets, the default first.
 #[tauri::command]
 pub fn presets() -> Vec<PresetInfo> {
     media::presets()
 }
 
-/// Queues a download into the library; progress arrives as job events with the entry's id.
+/// Queues a download into the library (one per picked section); progress arrives as job events with each entry's id.
 #[tauri::command]
 pub async fn start_download(
     downloads: State<'_, Downloads>,
     jobs: State<'_, Arc<Jobs>>,
     settings: State<'_, Store>,
     request: DownloadRequest,
-) -> Result<DownloadEntry, String> {
+) -> Result<Vec<DownloadEntry>, String> {
     downloads.start(&jobs, settings.get().library_root, request).await
 }
 
-/// This session's downloads.
-#[tauri::command]
+/// The kept downloads.
+#[tauri::command(async)]
 pub fn downloads(downloads: State<Downloads>) -> Vec<DownloadEntry> {
     downloads.list()
+}
+
+/// Removes a finished download from the list; its files stay. Returns the list.
+#[tauri::command(async)]
+pub fn remove_download(downloads: State<Downloads>, id: JobId) -> Result<Vec<DownloadEntry>, String> {
+    downloads.remove(id)
+}
+
+/// Removes every finished download from the list; their files stay. Returns what's left.
+#[tauri::command(async)]
+pub fn clear_downloads(downloads: State<Downloads>) -> Vec<DownloadEntry> {
+    downloads.clear()
 }
