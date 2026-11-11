@@ -38,6 +38,7 @@ Rust builds put their intermediate files in the workspace's `_cache/`; the final
 | `extension/` | The WXT browser extension: a background script and one popup; `lib/types/` is generated |
 | `docs/adr/` | Architecture overview, decisions and milestone tracker |
 | `scripts/` | `check-size.mjs`, `check-boundaries.mjs`, `register-host.mjs` |
+| `assets/brand/` | The README's banners, dark and light |
 
 ## Architecture
 
