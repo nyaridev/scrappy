@@ -1,7 +1,7 @@
 {
   "name": "scrappy",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "iro-ui": "github:nyaridev/iro-ui#v1.1.0",
+    "iro-ui": "github:nyaridev/iro-ui#v1.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

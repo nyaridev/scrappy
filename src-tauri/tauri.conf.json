@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Scrappy",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.nyaridev.scrappy",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -12,8 +12,16 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' scrappy: http://scrappy.localhost; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "freezePrototype": true
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY5RjQzOUQ3MEU0NTg4NjEKUldSaGlFVU8xem4wYVVTdUt4RjhldU52L3VpcHdVKzFJWFl0NlBvUk5WMXpEMTJ1dnJhcStablgK",
+      "endpoints": ["https://github.com/nyaridev/scrappy/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {
