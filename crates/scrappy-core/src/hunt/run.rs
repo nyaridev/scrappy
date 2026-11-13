@@ -286,7 +286,8 @@ async fn save_one(shared: &Shared<'_>, index: usize, page: &str, url: String, ta
     if shared.job.cancelled() || shared.known.contains(&url) {
         return;
     }
-    if taken.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < limit).then_some(n + 1)).is_err() {
+    if taken.fetch_add(1, Ordering::Relaxed) >= limit {
+        taken.fetch_sub(1, Ordering::Relaxed);
         return;
     }
     let kept = if !first_time(&shared.images_seen, &url) {

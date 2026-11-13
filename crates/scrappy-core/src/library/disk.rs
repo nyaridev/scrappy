@@ -107,10 +107,12 @@ fn lock(state: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
 
 /// Watches `root`: a change the Gallery would show drops the kept list and calls `on_change`.
 fn watch(root: &Path, state: Weak<Mutex<State>>, on_change: OnChange) -> Option<Debouncer<RecommendedWatcher>> {
-    let base = root.to_path_buf();
+    // macOS reports a linked folder's real path (`/var` is `/private/var`): events may come under either.
+    let bases = [root.to_path_buf(), root.canonicalize().unwrap_or_else(|_| root.to_path_buf())];
+    let relative = move |path: &Path| bases.iter().find_map(|base| path.strip_prefix(base).ok().map(Path::to_path_buf));
     let handler = move |result: DebounceEventResult| {
         let Ok(events) = result else { return };
-        let shown = events.iter().any(|event| event.path.strip_prefix(&base).is_ok_and(|relative| !left_out(relative)));
+        let shown = events.iter().any(|event| relative(&event.path).is_some_and(|relative| !left_out(&relative)));
         let Some(state) = state.upgrade().filter(|_| shown) else { return };
         lock(&state).files = None;
         on_change();
