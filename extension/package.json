@@ -2,7 +2,7 @@
   "name": "scrappy-extension",
   "description": "Sends videos and images to the Scrappy app: Download buttons on pages, and a list of each page's media.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
