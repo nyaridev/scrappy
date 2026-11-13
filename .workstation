@@ -1,0 +1,10 @@
+{
+  "name": "Scrappy",
+  "kind": "app",
+  "stack": ["Tauri", "Rust", "React", "iro-ui", "WXT"],
+  "owner": "nyaridev",
+  "status": "prototyping",
+  "description": "Downloads videos and media from any site, grabs page streams, crawls and scrapes images, and keeps a gallery.",
+  "tags": ["public", "desktop", "rust", "media", "scraping"],
+  "notes": "Includes a Chrome/Brave/Firefox extension in extension/. Replaces the old Python video-downloader in the old projects folder."
+}
