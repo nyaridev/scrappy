@@ -1,4 +1,13 @@
-# People: the whole web, plus encyclopedias and photo archives.
+# People: encyclopedias, photo archives, film databases and fan pages.
 name = "People"
-web = true
-sites = ["wikipedia.org", "commons.wikimedia.org", "flickr.com"]
+group = "Entertainment"
+web = false
+sites = [
+  "wikipedia.org",
+  "commons.wikimedia.org",
+  "flickr.com",
+  "imdb.com",
+  "pinterest.com",
+  "tumblr.com",
+  "reddit.com",
+]

@@ -1,6 +1,6 @@
 # ADR-0015: The Gallery shows the library folder, watched live
 
-**Status:** Accepted
+**Status:** Accepted; the site filter is replaced by a folder sidebar since ADR-0021
 **Date:** 2026-11-10
 **Supersedes:** ADR-0004's Gallery reading the catalog (M9); adds an event to ADR-0010
 

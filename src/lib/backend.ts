@@ -1,310 +1,102 @@
 // Backend: the only file that talks to Rust (invoke and listen). Outside the app (`pnpm dev` in a browser) it
-// answers with fake data, so every view can be previewed.
-// Preview flags: `?setup` (first run), `?notEmpty` (first run, the picked folder isn't empty), `?missing` (the library
-// folder is gone), `?tools` (the tools step: nothing installed), `?toolFails` (the tools step, Deno's download fails),
-// `?outdated` (the tools step: Scrappy's yt-dlp and a system FFmpeg are older than the pins), `?probeFails` (a
-// link check fails), `?empty` (a library with no downloads yet, no signed-in sites), `?signIn` (a link check needs a
-// sign-in),
-// links with `playlist` (a 40-video playlist), links with `/@` (a channel: Videos and Shorts), links to x.com,
-// instagram.com or bsky.app (a profile with 50+ files), two kept downloads unless `?empty`, `?scanFails` (Grab's scan finds no browser), `?handed` (the extension handed a page to Grab at start),
-// `?overlay` (macOS title bar), `?native` (system title bar), `?packProblem` (a user's Hunt pack can't be read), `?bigPage` (Grab's scan finds 1300 images), `?noHost` (no scrappy-host beside the app). The default is a ready library, every tool installed and
-// the custom title bar.
+// answers with fake data, so every view can be previewed: the data and its preview flags are in `fakeData.ts`, the
+// fake hunt in `fakeHunt.ts`; the fake state those answers change is kept here.
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  fakeCheck,
+  fakeDownloadsAtStart,
+  fakeDuplicates,
+  fakeFinished,
+  fakeFolders,
+  fakeFrame,
+  fakeGallery,
+  fakeJob,
+  fakeLibraryAtStart,
+  fakeLinkKind,
+  fakeMirrorFinds,
+  fakeOther,
+  fakePacks,
+  fakePage,
+  fakePart,
+  fakePicture,
+  fakePresets,
+  fakeProbe,
+  fakeProgress,
+  fakeRecent,
+  fakeRoot,
+  fakeSettingsAtStart,
+  fakeStats,
+  fakeStopped,
+  fakeThumbnail,
+  fakeToolsAtStart,
+  fakeTrashed,
+  flags,
+} from "./fakeData";
+import { fakeHunt } from "./fakeHunt";
 import type { AppInfo } from "./types/AppInfo";
 import type { CrawlRequest } from "./types/CrawlRequest";
 import type { CrawlStarted } from "./types/CrawlStarted";
 import type { DownloadEntry } from "./types/DownloadEntry";
 import type { DownloadLimits } from "./types/DownloadLimits";
 import type { DownloadRequest } from "./types/DownloadRequest";
+import type { DownloadSource } from "./types/DownloadSource";
 import type { DuplicateRequest } from "./types/DuplicateRequest";
+import type { FindKind } from "./types/FindKind";
 import type { FolderCheck } from "./types/FolderCheck";
-import type { GalleryItem } from "./types/GalleryItem";
 import type { GalleryPage } from "./types/GalleryPage";
 import type { GalleryQuery } from "./types/GalleryQuery";
 import type { GrabRequest } from "./types/GrabRequest";
 import type { HostStatus } from "./types/HostStatus";
 import type { HuntRequest } from "./types/HuntRequest";
 import type { HuntStarted } from "./types/HuntStarted";
+import type { HuntStatus } from "./types/HuntStatus";
 import type { JobFinished } from "./types/JobFinished";
 import type { JobProgress } from "./types/JobProgress";
 import type { LibraryStatus } from "./types/LibraryStatus";
-import type { ListEntry } from "./types/ListEntry";
 import type { Look } from "./types/Look";
+import type { MediaRequest } from "./types/MediaRequest";
+import type { MirrorMedia } from "./types/MirrorMedia";
+import type { Pack } from "./types/Pack";
 import type { Packs } from "./types/Packs";
 import type { PageScan } from "./types/PageScan";
 import type { Picked } from "./types/Picked";
 import type { Picture } from "./types/Picture";
+import type { Player } from "./types/Player";
+import type { Preferences } from "./types/Preferences";
 import type { PresetInfo } from "./types/PresetInfo";
 import type { Probe } from "./types/Probe";
 import type { RecentDownload } from "./types/RecentDownload";
 import type { RememberedSite } from "./types/RememberedSite";
+import type { ScanRequest } from "./types/ScanRequest";
 import type { Settings } from "./types/Settings";
 import type { Stats } from "./types/Stats";
-import type { Tool } from "./types/Tool";
 import type { ToolJob } from "./types/ToolJob";
 import type { ToolStatus } from "./types/ToolStatus";
-import type { WindowFrame } from "./types/WindowFrame";
+import type { UpdateStatus } from "./types/UpdateStatus";
 
 // ── Fake backend ──────────────────────────
 const inTauri = "__TAURI_INTERNALS__" in window;
-const flags = new URLSearchParams(window.location.search);
-const fakeRoot = "D:/Scrappy";
-const fakeFrame: WindowFrame = flags.has("native") ? "native" : flags.has("overlay") ? "overlay" : "custom";
-let fakeLibrary: LibraryStatus =
-  flags.has("setup") || flags.has("notEmpty")
-    ? { state: "notSet" }
-    : flags.has("missing")
-      ? { state: "missing", root: "E:/Scrappy" }
-      : { state: "ready", root: fakeRoot };
-let fakeSettings: Settings = {
-  libraryRoot: fakeLibrary.state === "notSet" ? null : fakeLibrary.root,
-  look: { nativeFrame: fakeFrame === "native", liquidBackground: true },
-  downloads: { atOnce: 10, speedLimit: 0 },
-};
-
-/** Rust's answers, roughly: rejects with a plain message, as `invoke` does. */
-async function fakeCheck(input: string): Promise<FolderCheck> {
-  const path = input.trim();
-  if (!path) return Promise.reject("Enter a folder.");
-  if (!/^([a-z]:[\\/]|\/)/i.test(path)) return Promise.reject("Not a full path.");
-  return { path, exists: true, writable: true, empty: !flags.has("notEmpty"), library: false };
-}
-
-const toolsMissing = ["setup", "notEmpty", "missing", "tools", "toolFails"].some((flag) => flags.has(flag));
-const pins: Record<Tool, string> = { "yt-dlp": "2026.10.26", deno: "2.9.8", "gallery-dl": "1.33.0", ffmpeg: "9.0.2" };
-let fakeTools: ToolStatus[] = (Object.keys(pins) as Tool[]).map((tool) => ({
-  tool,
-  source: toolsMissing ? "missing" : "scrappy",
-  version: toolsMissing ? null : pins[tool],
-  pinnedVersion: pins[tool],
-  outdated: false,
-  downloadable: true,
-  job: null,
-}));
-if (flags.has("outdated")) {
-  fakeTools[0] = { ...fakeTools[0], version: "2025.01.01", outdated: true };
-  fakeTools[3] = { ...fakeTools[3], source: "system", version: "7.1-full_build", outdated: true };
-}
+let fakeLibrary = fakeLibraryAtStart;
+let fakeExtensionFolder: string | null = null;
+let fakeSettings = fakeSettingsAtStart;
+let fakeTools = fakeToolsAtStart;
+let fakeDownloads = fakeDownloadsAtStart;
 let fakeHandedTaken = false;
-const fakeProgress = new Set<(progress: JobProgress) => void>();
-const fakeFinished = new Set<(finished: JobFinished) => void>();
 // Above the kept fake downloads' ids.
 let fakeJobId = 1000;
-
-const fakePresets: PresetInfo[] = [
-  { id: "editor-mp4", name: "MP4 (H.264)", audio: false },
-  { id: "original", name: "MKV (original)", audio: false },
-  { id: "hevc-mp4", name: "MP4 (HEVC)", audio: false },
-  { id: "prores-mov", name: "MOV (ProRes)", audio: false },
-  { id: "mp3", name: "MP3 (320 kbps)", audio: true },
-  { id: "m4a", name: "M4A (AAC)", audio: true },
-  { id: "flac", name: "FLAC", audio: true },
-  { id: "wav", name: "WAV", audio: true },
-];
-const fakeThumbnail = `data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><defs><linearGradient id="g"><stop stop-color="#3a5f4a"/><stop offset="1" stop-color="#8fae6e"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/></svg>',
-)}`;
-const fakeKept = { thumbnail: fakeThumbnail, files: null, skipped: null, preset: "MP4 (H.264)" };
-let fakeDownloads: DownloadEntry[] = flags.has("empty")
-  ? []
-  : [
-      {
-        ...fakeKept,
-        id: 901,
-        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        title: "An older download",
-        state: "done",
-        file: "Videos/someone/An older download [dQw4w9WgXcQ].mp4",
-        size: 48_300_000,
-        error: null,
-      },
-      {
-        ...fakeKept,
-        id: 902,
-        url: "https://vimeo.com/1",
-        title: "A failed one",
-        state: "failed",
-        file: null,
-        size: null,
-        error: "Download failed: connection reset",
-      },
-    ];
-
-const fakeEmpty = flags.has("empty");
-const fakeRecent: RecentDownload[] = fakeEmpty
-  ? []
-  : [
-      ["Videos/jawed/Me at the zoo [jNQXAC9IVRw].mp4", "video", "youtube", 791_000, 0.1],
-      ["Audio/Lofi Girl/lofi hip hop radio [jfKfPfyJRdk].mp3", "audio", "youtube", 9_400_000, 3],
-      ["Videos/NASA/Artemis II launch [nA9UZF-SZoQ].mp4", "video", "youtube", 412_000_000, 26],
-      ["Videos/Vimeo Staff/The Mountain [22439234].mp4", "video", "vimeo", 98_000_000, 50],
-      ["Audio/Field Recordings/Rain on a tin roof [8812].flac", "audio", "soundcloud", 61_000_000, 170],
-    ].map(([path, kind, site, bytes, hoursAgo]) => ({
-      path: path as string,
-      name: (path as string).replace(/^.*\/|\.[^.]+$/g, ""),
-      kind: kind as string,
-      site: site as string,
-      bytes: bytes as number,
-      downloadedAt: Math.floor(Date.now() / 1000 - (hoursAgo as number) * 3600),
-    }));
-const fakeDays = Array.from({ length: 30 }, (_, index) => {
-  const day = new Date(Date.now() - (29 - index) * 86_400_000);
-  const files = fakeEmpty ? 0 : [0, 2, 5, 1, 0, 3, 8][index % 7];
-  return { day: day.toISOString().slice(0, 10), files, bytes: files * 70_000_000 };
-});
-const fakeStats: Stats = {
-  files: fakeEmpty ? 0 : 80,
-  bytes: fakeEmpty ? 0 : 5_525_000_000,
-  kinds: fakeEmpty
-    ? []
-    : [
-        { name: "video", files: 61, bytes: 5_100_000_000 },
-        { name: "audio", files: 19, bytes: 425_000_000 },
-        { name: "image", files: 24, bytes: 62_000_000 },
-      ],
-  sites: fakeEmpty
-    ? []
-    : [
-        { name: "youtube", files: 70, bytes: 5_000_000_000 },
-        { name: "vimeo", files: 6, bytes: 440_000_000 },
-        { name: "soundcloud", files: 4, bytes: 85_000_000 },
-      ],
-  days: fakeDays,
-};
-
-/** What a fake link holds, by its address. */
-function fakeLinkKind(url: string): "video" | "playlist" | "channel" | "profile" {
-  if (/x\.com|instagram\.com|bsky\.app/.test(url)) return "profile";
-  if (/\/@/.test(url)) return "channel";
-  return /playlist/.test(url) ? "playlist" : "video";
-}
-
-/** A fake job: reports `total` bytes (or with `items`, files) over about two seconds, then ends with `failed` or
- * done. */
-function fakeJob(id: number, total: number, onEnd: (failed: boolean) => void, failed = false, items = false) {
-  let done = 0;
-  const timer = setInterval(
-    () => {
-      done = Math.min(total, items ? done + 1 : done + total / 16);
-      const report: JobProgress = items
-        ? { id, phase: "items", done, total, speed: null, eta: null, message: `File ${done}.jpg` }
-        : { id, phase: "download", done, total, speed: 8e6, eta: 2, message: null };
-      fakeProgress.forEach((send) => void send(report));
-      if (done < total) return;
-      clearInterval(timer);
-      onEnd(failed);
-      const result = failed
-        ? { state: "failed" as const, message: "Download failed: connection reset" }
-        : { state: "done" as const };
-      fakeFinished.forEach((send) => void send({ id, result }));
-    },
-    items ? 60 : 120,
-  );
-}
-
-/** A colored picture standing in for a thumbnail. */
-function fakePicture(hue: number, width = 320, height = 180): string {
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="hsl(${hue} 35% 42%)"/><circle cx="${width * 0.7}" cy="${height * 0.35}" r="${height * 0.15}" fill="hsl(${hue} 50% 75%)"/></svg>`,
-  )}`;
-}
-
-const fakeGallery: GalleryItem[] = fakeEmpty
-  ? []
-  : Array.from({ length: 104 }, (_, index) => {
-      const kind = index % 5 === 0 ? "audio" : index % 3 === 0 ? "image" : "video";
-      const site = ["youtube", "vimeo", "soundcloud", "bluesky"][index % 4];
-      const ext = { video: "mp4", audio: "mp3", image: "jpg" }[kind];
-      const folder = { video: "Videos/NASA", audio: "Audio/Lofi Girl", image: "Images/bluesky" }[kind];
-      const name = `${kind === "image" ? "Photo" : kind === "audio" ? "Track" : "Clip"} ${104 - index}.${ext}`;
-      return {
-        path: `${folder}/${name}`,
-        name,
-        kind,
-        site,
-        user: null,
-        bytes: (index + 1) * 3_100_000,
-        duration: kind === "image" ? null : 30 + index * 7,
-        downloadedAt: Math.floor(Date.now() / 1000) - index * 5400,
-      };
-    });
-
-/** Library files the fake trash took. */
-const fakePacks: Packs = {
-  packs: [
-    { id: "general", name: "General", web: true, sites: [] },
-    {
-      id: "games",
-      name: "Games",
-      web: true,
-      sites: ["fandom.com", "wikipedia.org", "artstation.com", "deviantart.com"],
-    },
-    {
-      id: "art",
-      name: "Art styles",
-      web: true,
-      sites: ["artstation.com", "deviantart.com", "behance.net", "wikiart.org"],
-    },
-    { id: "people", name: "People", web: true, sites: ["wikipedia.org", "commons.wikimedia.org", "flickr.com"] },
-  ],
-  problems: flags.has("packProblem") ? ["mine.toml: unknown field `site`, expected one of `name`, `web`, `sites`"] : [],
-};
+/** Set after the first fake duplicate scan: later ones end at once, as the app's do with every picture hashed. */
+let fakeHashed = false;
+/** The fake hunt's sources, read as they are now. */
+let fakeHuntStatus: { id: number; read: () => HuntStatus } | null = null;
+/** Fake scans: what each has found so far. */
+const fakeScans = new Map<number, PageScan>();
+const fakeChecks = new Map<number, Probe>();
+const fakeMirrors = new Map<string, MirrorMedia>();
 let fakeHost: HostStatus = { connected: [], available: !flags.has("noHost") };
-const fakeTrashed = new Set<string>();
 const fakeFound = new Map<number, Picture[][]>();
-
-/** The fake gallery's pictures in groups of two or three, the first (largest) one best. */
-function fakeDuplicates(): Picture[][] {
-  const pictures = fakeGallery.filter((item) => item.kind === "image" && !fakeTrashed.has(item.path));
-  const groups: Picture[][] = [];
-  for (let at = 0; at + 1 < pictures.length && groups.length < 4; at += 3) {
-    groups.push(
-      pictures.slice(at, at + (groups.length % 2 ? 2 : 3)).map((item, index) => ({
-        path: item.path,
-        name: item.name,
-        width: 1600 >> index,
-        height: 1000 >> index,
-        bytes: item.bytes >> index,
-        format: index === 0 ? "PNG" : "JPG",
-        quality: index === 0 ? null : 92 - index * 10,
-      })),
-    );
-  }
-  return groups;
-}
-
-/** A page as a scan finds it: a video, a stream, audio, images and a file. */
-function fakePage(url: string): PageScan {
-  const base = "https://cdn.example.com/launch";
-  return {
-    url,
-    title: "Launch day",
-    finds: [
-      { url: `${base}/trailer.mp4`, kind: "video", name: "trailer.mp4", size: 48_200_000 },
-      { url: `${base}/hls/master.m3u8`, kind: "stream", name: "master.m3u8", size: null },
-      { url: `${base}/theme.mp3`, kind: "audio", name: "theme.mp3", size: 3_900_000 },
-      ...["hero.jpg", "crew-1.jpg", "crew-2.jpg", "rocket.webp", "patch.png", "logo.svg"].map((name, index) => ({
-        url: `${base}/img/${name}`,
-        kind: "image" as const,
-        name,
-        size: index === 5 ? null : 180_000 * (index + 1),
-      })),
-      { url: `${base}/press-kit.pdf`, kind: "other", name: "press-kit.pdf", size: 2_400_000 },
-      // `?bigPage`: a page of 1300 images, to try grabbing a lot at once.
-      ...(flags.has("bigPage")
-        ? Array.from({ length: 1300 }, (_, n) => ({
-            url: `${base}/gallery/${n}.jpg`,
-            kind: "image" as const,
-            name: `photo-${n}.jpg`,
-            size: 40_000 + n * 97,
-          }))
-        : []),
-    ],
-  };
-}
 
 /** Fake installs: each missing tool "downloads" over about two seconds. */
 function fakeInstall(): ToolJob[] {
@@ -337,6 +129,60 @@ export async function appInfo(): Promise<AppInfo> {
   return inTauri ? invoke("app_info") : { version: "0.1.0", os: "browser preview", frame: fakeFrame };
 }
 
+// ── Updates ───────────────────────────────
+// Outside the app: `?update` has a newer version to install, which "downloads" over two seconds.
+let fakeUpdate: UpdateStatus = {
+  current: "0.1.0",
+  latest: flags.has("update") ? "0.2.0" : null,
+  step: null,
+  progress: null,
+  error: null,
+  canUpdate: true,
+  checkedAt: null,
+};
+const fakeUpdateHandlers = new Set<(status: UpdateStatus) => void>();
+
+function setFakeUpdate(change: Partial<UpdateStatus>) {
+  fakeUpdate = { ...fakeUpdate, ...change };
+  for (const handler of fakeUpdateHandlers) handler(fakeUpdate);
+}
+
+/** What Scrappy's updater knows now (ADR-0037). */
+export async function updateStatus(): Promise<UpdateStatus> {
+  return inTauri ? invoke("update_status") : fakeUpdate;
+}
+
+/** Looks for a newer Scrappy now. */
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  if (inTauri) return invoke("check_for_update");
+  setFakeUpdate({ step: "checking", error: null });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  setFakeUpdate({ step: null, checkedAt: Math.floor(Date.now() / 1000) });
+  return fakeUpdate;
+}
+
+/** Installs the update a check found; Scrappy restarts into it. */
+export async function installUpdate(): Promise<void> {
+  if (inTauri) return invoke("install_update");
+  for (let percent = 0; percent <= 100; percent += 10) {
+    setFakeUpdate({ step: "downloading", progress: percent / 100 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  setFakeUpdate({ step: "installing", progress: null });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  setFakeUpdate({ current: fakeUpdate.latest ?? fakeUpdate.current, latest: null, step: null });
+}
+
+/** Calls `handler` with each change of the updater's status. */
+export function onUpdateChanged(handler: (status: UpdateStatus) => void): () => void {
+  if (!inTauri) {
+    fakeUpdateHandlers.add(handler);
+    return () => void fakeUpdateHandlers.delete(handler);
+  }
+  const unlisten = listen<UpdateStatus>("update-changed", (event) => handler(event.payload));
+  return () => void unlisten.then((stop) => stop());
+}
+
 // ── Library ───────────────────────────────
 /** Where the library stands: not set up yet, ready, or missing. */
 export async function libraryStatus(): Promise<LibraryStatus> {
@@ -361,6 +207,19 @@ export async function setupLibrary(path: string): Promise<LibraryStatus> {
   return fakeLibrary;
 }
 
+/** Starts moving the library to `path` as a job (ADR-0039); follow it with `onJobProgress` and `onJobFinished`. When
+ * it's done, the library is at `path`. */
+export async function moveLibrary(path: string): Promise<number> {
+  if (inTauri) return invoke("move_library", { path });
+  const id = ++fakeJobId;
+  fakeJob(id, 2_400_000_000, (failed) => {
+    if (failed) return;
+    fakeLibrary = { state: "ready", root: path };
+    fakeSettings = { ...fakeSettings, libraryRoot: path };
+  });
+  return id;
+}
+
 // ── Tools ─────────────────────────────────
 /** Every tool, where it is, its version and any install running. */
 export async function toolsStatus(): Promise<ToolStatus[]> {
@@ -375,7 +234,9 @@ export async function installTools(): Promise<ToolJob[]> {
 // ── Jobs ──────────────────────────────────
 /** Asks a job to stop. */
 export async function cancelJob(id: number): Promise<boolean> {
-  return inTauri ? invoke("cancel_job", { id }) : false;
+  if (inTauri) return invoke("cancel_job", { id });
+  fakeStopped.add(id);
+  return false;
 }
 
 /** Calls `handler` with every job's progress. Returns the unsubscribe. */
@@ -399,93 +260,42 @@ export function onJobFinished(handler: (finished: JobFinished) => void): () => v
 }
 
 // ── Media ─────────────────────────────────
-/** A link's details: title, channel, length, thumbnail and the video heights on offer; for a playlist or profile, its
- * size and first entries. */
-export async function probeUrl(url: string): Promise<Probe> {
-  if (inTauri) return invoke("probe_url", { url });
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  if (flags.has("probeFails") || !url.startsWith("http"))
-    return Promise.reject("Video unavailable. This video is private");
-  if (flags.has("signIn"))
-    return Promise.reject(
-      "youtube.com needs you signed in. Send the page from the Scrappy extension to share your sign-in.",
-    );
-  const one = { count: null, more: false, files: false, items: [], sections: [], entries: [] };
-  const video = { url, channel: "jawed", duration: 19, site: "youtube", thumbnail: fakeThumbnail };
-  switch (fakeLinkKind(url)) {
-    case "video":
-      return { ...video, ...one, title: "Me at the zoo", heights: [1080, 720, 480, 240] };
-    case "playlist":
-      return {
-        ...video,
-        title: "Pygame Programming Tutorials",
-        channel: "Tech With Tim",
-        duration: null,
-        heights: [2160, 1440, 1080, 720, 480, 360],
-        count: 40,
-        more: false,
-        files: false,
-        items: ["Pygame Tutorial #1 - Basic Movement", "Pygame Tutorial #2 - Jumping", "Pygame Tutorial #3 - Sprites"],
-        sections: [],
-        entries: fakeListEntries(40, "Pygame Tutorial #", "watch?v=pg"),
-      };
-    case "channel":
-      return {
-        ...video,
-        title: "GDULA",
-        channel: "GDULA",
-        duration: null,
-        heights: [2160, 1440, 1080, 720, 480, 360],
-        count: 22,
-        more: false,
-        files: false,
-        items: ["GDULA - TOM FORD", "GDULA - KOSMOS", "GDULA - NOCE"],
-        sections: [
-          {
-            url: `${url}/videos`,
-            title: "Videos",
-            count: 6,
-            more: false,
-            entries: fakeListEntries(6, "Video ", "watch?v=v"),
-          },
-          {
-            url: `${url}/shorts`,
-            title: "Shorts",
-            count: 16,
-            more: false,
-            entries: fakeListEntries(16, "Short ", "shorts/s"),
-          },
-        ],
-        entries: [],
-      };
-    case "profile":
-      return {
-        url,
-        title: "bsky.app",
-        channel: null,
-        duration: null,
-        site: "bluesky",
-        thumbnail: fakeThumbnail,
-        heights: [],
-        count: 50,
-        more: true,
-        files: true,
-        items: ["3lmxqzg2b4c2a_1.jpeg", "3lmxqzg2b4c2a_2.jpeg", "3llwpk7rjvs2x_1.mp4"],
-        sections: [],
-        entries: [],
-      };
-  }
+/** Checks a link as a job (ADR-0030): its progress is the videos listed so far, and `listedLink` returns what it
+ * found. A list shows from its first videos and grows; stopped, what was listed is the list. */
+export async function listLink(url: string): Promise<number> {
+  if (inTauri) return invoke("list_link", { url });
+  const id = ++fakeJobId;
+  const failure =
+    flags.has("probeFails") || !url.startsWith("http") ? "Video unavailable. This video is private" : null;
+  const signIn = "youtube.com needs you signed in. Send the page from the Scrappy extension to share your sign-in.";
+  const error = flags.has("signIn") ? signIn : failure;
+  const all = fakeProbe(url);
+  fakeChecks.clear();
+  // A list grows over four seconds, as a long one does; anything else shows when it's done.
+  const steps = all.count != null && !all.files ? 8 : 1;
+  let step = 0;
+  const timer = setInterval(() => {
+    step += 1;
+    const stopped = fakeStopped.has(id);
+    const ended = stopped || step >= steps;
+    if (!error && (steps > 1 || ended))
+      fakeChecks.set(id, ended && !stopped ? all : fakePart(all, step / steps, stopped));
+    const report: JobProgress = { id, phase: "items", done: step, total: null, speed: null, eta: null, message: null };
+    fakeProgress.forEach((send) => void send(report));
+    if (!ended) return;
+    clearInterval(timer);
+    const result = error
+      ? { state: "failed" as const, message: error }
+      : { state: stopped ? ("cancelled" as const) : ("done" as const) };
+    fakeFinished.forEach((send) => void send({ id, result }));
+  }, 500);
+  return id;
 }
 
-/** `count` fake videos of a list: `Video 1`, `Video 2`… */
-function fakeListEntries(count: number, title: string, path: string): ListEntry[] {
-  return Array.from({ length: count }, (_, n) => ({
-    url: `https://www.youtube.com/${path}${n + 1}`,
-    title: `${title}${n + 1}`,
-    duration: path.startsWith("shorts") ? null : 45 + ((n * 97) % 1800),
-    views: ((n * 7919) % 97) * 1300 + 400,
-    tall: path.startsWith("shorts"),
-  }));
+/** What the check `id` has found so far; all of it once its job ends. Null before it lists anything. */
+export async function listedLink(id: number): Promise<Probe | null> {
+  if (inTauri) return invoke("listed_link", { id });
+  return fakeChecks.get(id) ?? null;
 }
 
 /** The thumbnail of a video a probe listed, as a `data:` URL; null when there's none. */
@@ -524,14 +334,16 @@ export async function startDownload(request: DownloadRequest): Promise<DownloadE
 function fakeStart(request: DownloadRequest): DownloadEntry {
   const id = ++fakeJobId;
   const linkKind = fakeLinkKind(request.url);
-  const kind = linkKind === "channel" ? "playlist" : linkKind;
+  const kind = linkKind === "channel" || linkKind === "mix" ? "playlist" : linkKind;
   const preset = fakePresets.find((p) => p.id === request.preset)?.name ?? request.preset;
   const entry: DownloadEntry = {
     id,
+    source: "download",
     url: request.url,
     title: {
       video: "Me at the zoo",
       playlist: "Pygame Programming Tutorials",
+      mix: "Mix - Sleeping With Sirens - Forever/Always",
       channel: "GDULA - Videos",
       profile: "bsky.app",
     }[linkKind],
@@ -543,6 +355,7 @@ function fakeStart(request: DownloadRequest): DownloadEntry {
     skipped: null,
     size: null,
     error: null,
+    types: [],
   };
   const saved = {
     video: { file: "Videos/jawed/Me at the zoo [jNQXAC9IVRw].mp4", files: null, skipped: null, size: 30_000_000 },
@@ -552,7 +365,13 @@ function fakeStart(request: DownloadRequest): DownloadEntry {
       skipped: 2,
       size: ((request.limit ?? 40) - 2) * 85_000_000,
     },
-    profile: { file: "Social/bluesky/bsky.app", files: request.limit ?? 50, skipped: 0, size: 61_000_000 },
+    profile: {
+      file: "Social/bluesky/bsky.app",
+      files: request.limit ?? 50,
+      skipped: 0,
+      size: 61_000_000,
+      types: ["JPEG", "MP4", "PNG"],
+    },
   }[kind];
   const total = kind === "video" ? 30_000_000 : (request.limit ?? (kind === "playlist" ? 40 : 50));
   fakeDownloads = [...fakeDownloads, entry];
@@ -587,29 +406,109 @@ export async function removeDownload(id: number): Promise<DownloadEntry[]> {
 }
 
 /** Removes every finished download from the list (their files stay); returns what's left. */
-export async function clearDownloads(): Promise<DownloadEntry[]> {
-  if (inTauri) return invoke("clear_downloads");
-  fakeDownloads = fakeDownloads.filter((d) => d.state === "queued" || d.state === "running");
+/** Removes every finished download from the list, or only those from `source` (their files stay); returns what's
+ * left. */
+export async function clearDownloads(source: DownloadSource | null = null): Promise<DownloadEntry[]> {
+  if (inTauri) return invoke("clear_downloads", { source });
+  fakeDownloads = fakeDownloads.filter(
+    (d) => d.state === "queued" || d.state === "running" || (source != null && d.source !== source),
+  );
   return fakeDownloads;
 }
 
+/** Adds a row for a fake scrape or hunt, marked done with its files when `onEnd` runs. */
+function fakeTrack(id: number, source: DownloadSource, url: string, title: string, preset: string, folder: string) {
+  fakeDownloads = [
+    ...fakeDownloads,
+    { ...fakeOther, id, source, url, title, preset, state: "running", file: null, files: null },
+  ];
+  return (files: number) => {
+    fakeDownloads = fakeDownloads.map((d) => (d.id === id ? { ...d, state: "done", file: folder, files } : d));
+  };
+}
+
 // ── Grab ──────────────────────────────────
-/** Scans a page in a headless browser and lists what can be downloaded; takes a while. */
-export async function scanPage(url: string): Promise<PageScan> {
-  if (inTauri) return invoke("scan_page", { url });
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+/** Starts scanning a page (and, deeper, the pages it links to) with a headless browser, saving finds as they're found
+ * when asked; its progress arrives as job events with the id. */
+export async function startScan(request: ScanRequest): Promise<number> {
+  if (inTauri) return invoke("start_scan", { request });
+  const { url } = request;
   if (flags.has("scanFails")) return Promise.reject("Scanning needs Chrome, Brave or Edge installed.");
   if (!url.startsWith("http")) return Promise.reject("Not a link.");
-  return fakePage(url);
+  const id = ++fakeJobId;
+  const all = fakePage(url);
+  const page: PageScan = { url, title: null, finds: [], pages: 0, kept: {} };
+  // A deeper scan looks at a page more each step.
+  const pages = request.depth > 1 ? 4 * request.depth : 1;
+  fakeScans.clear();
+  fakeScans.set(id, page);
+  // Finds arrive over four seconds, as a real scan's do while the page loads and plays.
+  const steps = 8;
+  let step = 0;
+  const timer = setInterval(() => {
+    step += 1;
+    page.title = all.title;
+    page.finds = all.finds.slice(0, Math.ceil((all.finds.length * step) / steps));
+    page.pages = Math.max(1, Math.ceil((pages * step) / steps));
+    // Saving as found: the kept kinds' finds save, the newest still saving until the scan ends (ADR-0031).
+    if (request.save) {
+      const kept = page.finds.filter((find) => request.kinds.includes(find.kind));
+      page.kept = Object.fromEntries(
+        kept.map((find, n) => {
+          const small = find.size != null && find.size < request.minKb * 1024;
+          const state = small ? "small" : n >= kept.length - 2 && step < steps ? "saving" : "saved";
+          return [find.url, { state }];
+        }),
+      );
+    }
+    const report: JobProgress = {
+      id,
+      phase: "items",
+      done: page.finds.length,
+      total: null,
+      speed: null,
+      eta: null,
+      message: null,
+    };
+    fakeProgress.forEach((send) => void send(report));
+    const stopped = fakeStopped.has(id);
+    if (step < steps && !stopped) return;
+    clearInterval(timer);
+    const result = stopped ? { state: "cancelled" as const } : { state: "done" as const };
+    fakeFinished.forEach((send) => void send({ id, result }));
+  }, 500);
+  return id;
+}
+
+/** What a scan has found so far; all of it once its job ends. */
+export async function scannedPage(id: number): Promise<PageScan | null> {
+  if (inTauri) return invoke("scanned_page", { id });
+  const page = fakeScans.get(id);
+  return page ? { ...page, finds: [...page.finds] } : null;
+}
+
+/** A find's thumbnail as a `data:` URL; `null` for audio and files, or one that can't be read. */
+export async function findThumbnail(url: string, kind: FindKind): Promise<string | null> {
+  if (inTauri) return invoke("find_thumbnail", { url, kind });
+  await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 600));
+  if (kind === "audio" || kind === "other") return null;
+  // Some tall and some wide, as a page's pictures are.
+  const shape = [
+    [320, 180],
+    [180, 320],
+    [320, 90],
+  ][url.length % 3];
+  return fakePicture((url.length * 37) % 360, shape[0], shape[1]);
 }
 
 /** Queues the picked finds into the library; follow each by its id. */
 export async function grabFinds(request: GrabRequest): Promise<Picked[]> {
   if (inTauri) return invoke("grab_finds", { request });
-  return request.finds.map((pick) => {
+  const picked = request.finds.map((pick) => {
     const id = ++fakeJobId;
     const entry: DownloadEntry = {
       id,
+      source: "grab",
       url: pick.url,
       title: pick.name,
       preset: pick.kind === "stream" ? "MP4 (H.264)" : "Original file",
@@ -620,14 +519,43 @@ export async function grabFinds(request: GrabRequest): Promise<Picked[]> {
       skipped: null,
       size: null,
       error: null,
+      types: [],
     };
     fakeDownloads = [...fakeDownloads, entry];
     fakeJob(id, 12_000_000, () => {
       const file = `Grabs/example.com/2026-11-10/${pick.name}`;
-      fakeDownloads = fakeDownloads.map((d) => (d.id === id ? { ...d, state: "done", file, size: 12_000_000 } : d));
+      const types = pick.kind === "stream" ? [] : [(pick.name.split(".").pop() ?? "").toUpperCase()];
+      fakeDownloads = fakeDownloads.map((d) =>
+        d.id === id ? { ...d, state: "done", file, size: 12_000_000, types } : d,
+      );
     });
     return { url: pick.url, id, error: null };
   });
+  // With "Remove duplicates" on and pictures picked, a row that removes one copy once they're saved (ADR-0029).
+  if (request.removeDuplicates && request.finds.filter((pick) => pick.kind === "image").length > 1) {
+    const id = ++fakeJobId;
+    const folder = "Grabs/example.com/2026-11-10";
+    const row: DownloadEntry = {
+      id,
+      source: "grab",
+      url: request.pageUrl,
+      title: request.title ?? request.pageUrl,
+      preset: "Remove duplicates",
+      state: "queued",
+      thumbnail: null,
+      file: null,
+      files: null,
+      skipped: null,
+      size: null,
+      error: null,
+      types: [],
+    };
+    fakeDownloads = [...fakeDownloads, row];
+    fakeJob(id, 1_000_000, () => {
+      fakeDownloads = fakeDownloads.map((d) => (d.id === id ? { ...d, state: "done", file: folder, files: 1 } : d));
+    });
+  }
+  return picked;
 }
 
 /** The page the extension handed to Grab, once. */
@@ -639,29 +567,79 @@ export async function handedPage(): Promise<PageScan | null> {
 }
 
 // ── Scrape ────────────────────────────────
-/** Starts a crawl of a site for its files; follow it by the returned id. */
+/** Starts mirroring a site or saving a page; follow it by the returned id. */
 export async function crawlSite(request: CrawlRequest): Promise<CrawlStarted> {
   if (inTauri) return invoke("crawl_site", { request });
   if (!request.url.startsWith("http")) return Promise.reject("Not a link.");
   const id = ++fakeJobId;
-  const host = new URL(request.url).host.replace(/^www\./, "");
-  const folder = request.mode === "files" ? `Images/${host}` : `Sites/${host}`;
-  const open = { files: null, mirror: `${folder}/index.html`, page: `${folder}/_pages/index.html` }[request.mode];
-  const total = request.mode === "page" ? 1 : request.files;
+  const site = new URL(request.url).host.replace(/^www\./, "");
+  const folder = `Sites/${site}`;
+  const open = { mirror: `${folder}/index.html`, page: `${folder}/_pages/index.html` }[request.mode];
+  const kind = { mirror: "Mirror", page: "Page" }[request.mode];
+  const end = fakeTrack(id, "scrape", request.url, site, kind, folder);
+  // A mirror lists its media as it goes, a page's worth at a time (ADR-0033).
+  const all = fakeMirrorFinds(request.url);
+  const mirror: MirrorMedia = { site, url: request.url, finds: [], kept: {}, busy: request.mode === "mirror" };
+  if (request.mode === "mirror") fakeMirrors.set(site, mirror);
+  const last = request.mode === "page" ? 1 : Math.min(request.pages, 20);
   let pages = 0;
-  let files = 0;
   const timer = setInterval(() => {
-    pages = Math.min(request.pages, pages + 1);
-    files = Math.min(total, files + 3);
+    pages += 1;
+    const files = pages * 3;
+    mirror.finds = all.slice(0, Math.ceil((all.length * pages) / last));
     const message = request.mode === "page" ? null : pages === 1 ? "1 page" : `${pages} pages`;
     fakeProgress.forEach(
-      (send) => void send({ id, phase: "items", done: files, total, speed: null, eta: null, message }),
+      (send) => void send({ id, phase: "items", done: files, total: null, speed: null, eta: null, message }),
     );
-    if (files < total && pages < request.pages) return;
+    if (pages < last) return;
     clearInterval(timer);
+    mirror.busy = false;
+    end(files);
     fakeFinished.forEach((send) => void send({ id, result: { state: "done" } }));
   }, 150);
-  return { id, folder, open };
+  return { id, site, folder, open };
+}
+
+/** A mirror's images and videos, and how saving each went (ADR-0033). */
+export async function mirrorMedia(site: string): Promise<MirrorMedia> {
+  if (inTauri) return invoke("mirror_media", { site });
+  const mirror = fakeMirrors.get(site);
+  if (!mirror) return Promise.reject("There's no mirror of this site.");
+  return { ...mirror, finds: [...mirror.finds], kept: { ...mirror.kept } };
+}
+
+/** Starts saving a mirror's picked images and videos into it; follow it by the returned id. */
+export async function saveMirrorMedia(request: MediaRequest): Promise<number> {
+  if (inTauri) return invoke("save_mirror_media", { request });
+  const mirror = fakeMirrors.get(request.site);
+  if (!mirror) return Promise.reject("There's no mirror of this site.");
+  if (mirror.busy) return Promise.reject("Wait for the mirror to finish.");
+  const picks = mirror.finds.filter((find) => request.urls.includes(find.url));
+  if (picks.length === 0) return Promise.reject("Pick something to save.");
+  const id = ++fakeJobId;
+  const end = fakeTrack(id, "scrape", mirror.url, mirror.site, "Media", `Sites/${mirror.site}`);
+  mirror.busy = true;
+  for (const pick of picks) mirror.kept[pick.url] = { state: "saving" };
+  let done = 0;
+  let saved = 0;
+  const timer = setInterval(() => {
+    const pick = picks[done];
+    // Every other clip is over the most a mirror keeps.
+    const big = pick.kind === "video" && Number(pick.name.match(/\d+/)?.[0]) % 2 === 0;
+    mirror.kept[pick.url] = { state: big ? "big" : "saved" };
+    saved += big ? 0 : 1;
+    done += 1;
+    const total = picks.length;
+    fakeProgress.forEach(
+      (send) => void send({ id, phase: "items", done, total, speed: null, eta: null, message: null }),
+    );
+    if (done < picks.length) return;
+    clearInterval(timer);
+    mirror.busy = false;
+    end(saved);
+    fakeFinished.forEach((send) => void send({ id, result: { state: "done" } }));
+  }, 120);
+  return id;
 }
 
 // ── Hunt ──────────────────────────────────
@@ -670,23 +648,66 @@ export async function huntPacks(): Promise<Packs> {
   return inTauri ? invoke("hunt_packs") : fakePacks;
 }
 
-/** Starts a hunt; follow it by the returned id. */
+/** Saves an edited pack as the user's; returns every pack, read again. */
+export async function savePack(pack: Pack): Promise<Packs> {
+  if (inTauri) return invoke("save_pack", { pack });
+  const name = pack.name.trim();
+  if (!name) return Promise.reject("The name must be 1 to 60 characters.");
+  if (!pack.web && pack.sites.length === 0) return Promise.reject("It has no sites and doesn't search the web.");
+  fakePacks.packs = fakePacks.packs.map((one) =>
+    one.id === pack.id ? { ...pack, name: one.builtIn ? one.name : name, builtIn: one.builtIn } : one,
+  );
+  return { ...fakePacks };
+}
+
+/** Saves a new pack of the user's; returns its id, which Rust makes from the name (ADR-0028). */
+export async function createPack(pack: Pack): Promise<string> {
+  if (inTauri) return invoke("create_pack", { pack });
+  const name = pack.name.trim();
+  if (!name) return Promise.reject("The name must be 1 to 60 characters.");
+  if (!pack.web && pack.sites.length === 0) return Promise.reject("It has no sites and doesn't search the web.");
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "pack";
+  let id = base;
+  for (let n = 2; fakePacks.packs.some((one) => one.id === id); n++) id = `${base}-${n}`;
+  fakePacks.packs = [...fakePacks.packs, { ...pack, id, name, group: null, builtIn: false }];
+  return id;
+}
+
+/** Deletes the user's own pack `id`; returns every pack, read again. Built-in packs can't be removed. */
+export async function removePack(id: string): Promise<Packs> {
+  if (inTauri) return invoke("remove_pack", { id });
+  if (fakePacks.packs.find((one) => one.id === id)?.builtIn) return Promise.reject("Built-in packs can't be removed.");
+  fakePacks.packs = fakePacks.packs.filter((one) => one.id !== id);
+  return { ...fakePacks };
+}
+
+/** Starts a hunt; follow it by the returned id, and its sources with `huntStatus`. */
 export async function startHunt(request: HuntRequest): Promise<HuntStarted> {
   if (inTauri) return invoke("start_hunt", { request });
   const id = ++fakeJobId;
-  const places = [...(request.web ? ["the web"] : []), ...request.sites];
-  let saved = 0;
-  const timer = setInterval(() => {
-    saved = Math.min(request.files, saved + 4);
-    const message = saved < 8 ? `Searching ${places[0]}` : ["fandom.com", "wikipedia.org", "gameforge.com"][saved % 3];
-    fakeProgress.forEach(
-      (send) => void send({ id, phase: "items", done: saved, total: request.files, speed: null, eta: null, message }),
-    );
-    if (saved < request.files) return;
-    clearInterval(timer);
-    fakeFinished.forEach((send) => void send({ id, result: { state: "done" } }));
-  }, 120);
-  return { id, folder: `Images/${request.query.trim()}` };
+  const folder = `Images/${request.query.trim()}`;
+  const track = fakeTrack(id, "hunt", "", request.query.trim(), "Images", folder);
+  const read = fakeHunt(request, {
+    report: (done, total, message) =>
+      fakeProgress.forEach((send) => void send({ id, phase: "items", done, total, speed: null, eta: null, message })),
+    stopped: () => fakeStopped.has(id),
+    end: (stopped, saved) => {
+      track(saved);
+      fakeFinished.forEach((send) => void send({ id, result: { state: stopped ? "cancelled" : "done" } }));
+    },
+  });
+  fakeHuntStatus = { id, read };
+  return { id, folder };
+}
+
+/** The hunt `id` as it is now (its sources, and its duplicates removed); `null` once a newer hunt started. */
+export async function huntStatus(id: number): Promise<HuntStatus | null> {
+  if (inTauri) return invoke("hunt_status", { id });
+  return fakeHuntStatus?.id === id ? fakeHuntStatus.read() : null;
 }
 
 /** Opens the folder for the user's own Hunt packs, making it first. */
@@ -714,6 +735,19 @@ export async function disconnectBrowsers(): Promise<HostStatus> {
   return fakeHost;
 }
 
+/** The folder with the extension for this version, once it's been downloaded; `null` before (ADR-0040). */
+export async function extensionFiles(): Promise<string | null> {
+  return inTauri ? invoke("extension_files") : fakeExtensionFolder;
+}
+
+/** Downloads the extension for this version from its release when it isn't there yet, then opens its folder. */
+export async function openExtensionFiles(): Promise<string> {
+  if (inTauri) return invoke("open_extension_files");
+  await new Promise((done) => setTimeout(done, 800));
+  fakeExtensionFolder = "C:/Users/someone/AppData/Roaming/com.nyaridev.scrappy/browser-extension";
+  return fakeExtensionFolder;
+}
+
 // ── Library history ───────────────────────
 /** The library's totals, per kind and site, and the last 30 days. */
 export async function libraryStats(): Promise<Stats> {
@@ -732,7 +766,10 @@ export async function galleryPage(query: GalleryQuery): Promise<GalleryPage> {
   const search = query.search?.trim().toLowerCase() ?? "";
   const matching = fakeGallery
     .filter((item) => !fakeTrashed.has(item.path))
-    .filter((item) => (!query.kind || item.kind === query.kind) && (!query.site || item.site === query.site))
+    .filter(
+      (item) =>
+        (!query.kind || item.kind === query.kind) && (!query.folder || item.path.startsWith(`${query.folder}/`)),
+    )
     .filter((item) => item.path.toLowerCase().includes(search));
   const sorted = [...matching].sort((a, b) => {
     switch (query.sort) {
@@ -751,7 +788,7 @@ export async function galleryPage(query: GalleryQuery): Promise<GalleryPage> {
     items: sorted.slice(query.offset, query.offset + query.limit),
     total: sorted.length,
     kinds: [...new Set(present.map((item) => item.kind))].sort(),
-    sites: [...new Set(present.flatMap((item) => (item.site ? [item.site] : [])))].sort(),
+    folders: fakeFolders(present),
   };
 }
 
@@ -766,7 +803,23 @@ export function onLibraryChanged(handler: () => void): () => void {
 export async function thumbnail(path: string): Promise<string | null> {
   if (inTauri) return invoke("thumbnail", { path });
   await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 400));
-  return /\.mp3$/.test(path) ? null : fakePicture((path.length * 37) % 360);
+  if (/\.mp3$/.test(path)) return null;
+  // Some tall and some wide, as a library's pictures are.
+  const shape = [
+    [320, 180],
+    [180, 320],
+    [320, 90],
+  ][path.length % 3];
+  return fakePicture((path.length * 37) % 360, shape[0], shape[1]);
+}
+
+/** Where the Gallery's player streams a library video or audio file from: the app's `scrappy:` protocol. */
+export function mediaUrl(path: string): string {
+  if (inTauri) return convertFileSrc(path, "scrappy");
+  // Previews in a browser play public samples.
+  return /\.mp3$/.test(path)
+    ? "https://www.w3schools.com/html/horse.mp3"
+    : "https://www.w3schools.com/html/mov_bbb.mp4";
 }
 
 /** A library picture whole, as a `data:` URL; `null` when the window can't show it (it opens in its app). */
@@ -784,7 +837,11 @@ export async function openFile(path: string): Promise<void> {
 export async function findDuplicates(request: DuplicateRequest): Promise<number> {
   if (inTauri) return invoke("find_duplicates", { request });
   const id = ++fakeJobId;
-  fakeJob(id, 30, () => fakeFound.set(id, flags.has("empty") ? [] : fakeDuplicates()), false, true);
+  const found = () => {
+    fakeHashed = true;
+    fakeFound.set(id, flags.has("empty") ? [] : fakeDuplicates());
+  };
+  fakeJob(id, fakeHashed ? 1 : 30, found, false, true);
   return id;
 }
 
@@ -801,6 +858,17 @@ export async function trashFiles(paths: string[]): Promise<number> {
   if (inTauri) return invoke("trash_files", { paths });
   for (const path of paths) fakeTrashed.add(path);
   return paths.length;
+}
+
+/** Deletes a library file, or a downloaded folder with everything in it, for good. */
+export async function deleteFromLibrary(path: string): Promise<void> {
+  if (inTauri) return invoke("delete_from_library", { path });
+  if (!path.includes("/") && !fakeGallery.some((item) => item.path === path)) {
+    return Promise.reject("The library's own folders can't be deleted.");
+  }
+  for (const item of fakeGallery) {
+    if (item.path === path || item.path.startsWith(`${path}/`)) fakeTrashed.add(item.path);
+  }
 }
 
 /** Opens the system file manager with a library file selected. */
@@ -846,6 +914,51 @@ export async function setDownloadLimits(limits: DownloadLimits): Promise<Setting
   const atOnce = Math.min(20, Math.max(1, Math.round(limits.atOnce)));
   fakeSettings = { ...fakeSettings, downloads: { atOnce, speedLimit: Math.max(0, limits.speedLimit) } };
   return fakeSettings;
+}
+
+/** Saves which Hunt packs are left out of its Pack list, and returns the settings (ADR-0028). */
+export async function setHiddenPacks(ids: string[]): Promise<Settings> {
+  if (inTauri) return invoke("set_hidden_packs", { ids });
+  fakeSettings = { ...fakeSettings, hiddenPacks: [...new Set(ids)] };
+  return fakeSettings;
+}
+
+/** Saves the Gallery player's volume and mute, and returns the settings. */
+export async function setPlayer(player: Player): Promise<Settings> {
+  if (inTauri) return invoke("set_player", { player });
+  fakeSettings = { ...fakeSettings, player: { volume: Math.min(1, Math.max(0, player.volume)), muted: player.muted } };
+  return fakeSettings;
+}
+
+/** Saves the preferences (Rust checks them and brings them into range) and returns the settings (ADR-0034). */
+export async function setPreferences(preferences: Preferences): Promise<Settings> {
+  if (inTauri) return invoke("set_preferences", { preferences });
+  const { media, proxy } = preferences;
+  if (!/^[\w.*-]+(,[\w.*-]+)*$/.test(media.subtitleLanguages.replace(/\s/g, ""))) {
+    return Promise.reject("Subtitle languages are codes like en or en,pl.");
+  }
+  if (!media.nameTemplate.trim()) return Promise.reject("The file name can't be empty or longer than 200 characters.");
+  if (proxy.trim() && !/^(https?|socks5h?):\/\/[^@\s/]+/.test(proxy.trim())) {
+    return Promise.reject("The proxy starts with http://, https://, socks5:// or socks5h://.");
+  }
+  fakeSettings = { ...fakeSettings, preferences: { ...preferences, proxy: proxy.trim() } };
+  return fakeSettings;
+}
+
+/** Where a single video goes with the name `template`, shown with a made-up video. */
+export async function nameExample(template: string): Promise<string> {
+  if (inTauri) return invoke("name_example", { template });
+  const fields: Record<string, string> = {
+    title: "How rockets land",
+    id: "dQw4w9WgXcQ",
+    channel: "Space Lab",
+    upload_date: "20260412",
+    site: "youtube.com",
+    user: "spacelab",
+    playlist: "",
+  };
+  const parts = template.split(/[\\/]/).map((part) => part.replace(/\{(\w+)\}/g, (all, name) => fields[name] ?? all));
+  return `Videos/${parts.filter((part) => part.trim()).join("/")}.mp4`;
 }
 
 // ── Window ────────────────────────────────

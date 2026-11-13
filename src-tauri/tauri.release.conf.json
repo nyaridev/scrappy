@@ -9,7 +9,7 @@
     "category": "Utility",
     "shortDescription": "Downloads videos and images from any site.",
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": { "installMode": "currentUser", "installerHooks": "windows/hooks.nsh" }
     }
   }
 }

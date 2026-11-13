@@ -1,0 +1,5 @@
+# Architecture and interiors: architecture magazines and interior design sites.
+name = "Architecture and interiors"
+group = "Art and design"
+web = false
+sites = ["archdaily.com", "dezeen.com", "houzz.com", "architecturaldigest.com", "pinterest.com", "unsplash.com"]

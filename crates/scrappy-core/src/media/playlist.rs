@@ -1,4 +1,4 @@
-//! Playlist: a playlist or channel as one job. yt-dlp saves its videos into `Videos/{channel}/{playlist}/` (or
+//! Playlist: a playlist or channel as one job. yt-dlp saves its videos into `Videos/{site}/{channel}/{playlist}/` (or
 //! `Audio/…`), skipping videos saved before (its archive in `.scrappy/`) and going on past ones that fail; each saved
 //! file then gets the preset's check and encode, and a catalog row. When the listing has every video (or the window
 //! left some out, ADR-0016), each video gets its own yt-dlp, side by side, one download slot each (ADR-0017);
@@ -12,7 +12,7 @@ use std::sync::{Mutex, PoisonError};
 use futures_util::stream::{self, StreamExt};
 use tokio::process::Command;
 
-use super::download::{FILE_MARK, Found, Saved, escape_template, finish, record_file, relative, size_of};
+use super::download::{FILE_MARK, Found, Saved, collection, escape_template, finish, record_file, relative, size_of};
 use super::engine;
 use super::presets::Preset;
 use super::probe::Info;
@@ -22,8 +22,8 @@ use crate::tools::Toolbox;
 use crate::vault::{Cookie, CookieFile};
 
 // ── Constants ─────────────────────────────
-const VIDEO_TEMPLATE: &str = "Videos/{channel}/{playlist}";
-const AUDIO_TEMPLATE: &str = "Audio/{channel}/{playlist}";
+const VIDEO_TEMPLATE: &str = "Videos/{site}/{channel}/{playlist}";
+const AUDIO_TEMPLATE: &str = "Audio/{site}/{channel}/{playlist}";
 const ARCHIVE: &str = ".scrappy/yt-dlp-archive.txt";
 /// yt-dlp's line for a video it skipped because the archive has it.
 const SKIPPED_TEXT: &str = "has already been recorded in the archive";
@@ -91,6 +91,7 @@ fn command(toolbox: &Toolbox, order: &PlaylistOrder, folder: &Path, cookies: Opt
         .arg(order.root.join(ARCHIVE))
         .arg("-o")
         .arg(format!("{}/%(title)s [%(id)s].%(ext)s", escape_template(&folder.to_string_lossy())));
+    engine::add_extras(&mut command, order.preset.audio);
     Ok(command)
 }
 
@@ -182,17 +183,17 @@ pub(super) async fn run(toolbox: &Toolbox, order: PlaylistOrder, job: &Job) -> R
 
     let channel = fields.channel.clone();
     let kind = if order.preset.audio { "audio" } else { "video" };
-    let files = u32::try_from(saved.len()).unwrap_or(u32::MAX);
     let mut bytes = 0;
+    let mut finished = Vec::new();
     for file in saved.into_iter().filter(|file| file.is_file()) {
         let (file, media) = finish(toolbox, order.preset, file, job).await?;
         bytes += size_of(&file).unwrap_or(0);
         let found = Found { kind, url: &order.url, site: info.site(), user: channel.clone(), transferred: None };
         record_file(&order.root, &file, found, media)?;
+        finished.push(file);
     }
-    tracing::info!("Saved {files} files from a playlist ({skipped} already saved)");
-    let path = Some(relative(&order.root, &folder));
-    Ok(Saved { path, files: Some(files), skipped: Some(skipped), bytes: Some(bytes) })
+    tracing::info!("Saved {} files from a playlist ({skipped} already saved)", finished.len());
+    Ok(collection(&order.root, Some(relative(&order.root, &folder)), &finished, skipped, bytes))
 }
 
 #[cfg(test)]

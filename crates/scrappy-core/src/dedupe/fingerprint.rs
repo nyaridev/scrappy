@@ -16,42 +16,44 @@ const STANDARD_LUMINANCE: [u32; 64] = [
     87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101,
     72, 92, 95, 98, 112, 100, 103, 99,
 ];
-/// The quantization tables come before the picture data; a header longer than this is unusual.
-const HEADER_BYTES: u64 = 256 * 1024;
+/// Read ahead while stepping through a JPEG's segments; most headers fit.
+const READ_AHEAD: usize = 4096;
 
 // ── Private helpers ───────────────────────
-/// The first luminance quantization table (`DQT`, table 0) in a JPEG's header.
-fn luminance_table(header: &[u8]) -> Option<Vec<u32>> {
-    if header.get(..2) != Some(&[0xFF, 0xD8]) {
+/// The first luminance quantization table (`DQT`, table 0) in a JPEG, read segment by segment: the other segments
+/// (EXIF and its thumbnail, color profiles) are skipped, not read.
+fn luminance_table(file: &mut BufReader<File>) -> Option<Vec<u32>> {
+    let mut start = [0; 2];
+    file.read_exact(&mut start).ok()?;
+    if start != [0xFF, 0xD8] {
         return None;
     }
-    let mut at = 2;
-    while at + 4 <= header.len() {
-        let (marker, length) = (header[at + 1], usize::from(u16::from_be_bytes([header[at + 2], header[at + 3]])));
-        if header[at] != 0xFF || length < 2 {
-            return None;
-        }
-        let segment = header.get(at + 4..at + 2 + length)?;
-        if marker == 0xDB {
-            let mut table = segment;
-            while let Some(&info) = table.first() {
-                let (wide, id) = (info >> 4 == 1, info & 0x0F);
-                let size = if wide { 128 } else { 64 };
-                let values = table.get(1..1 + size)?;
-                if id == 0 {
-                    let read = |i: usize| if wide { u32::from(u16::from_be_bytes([values[2 * i], values[2 * i + 1]])) } else { u32::from(values[i]) };
-                    return Some((0..64).map(read).collect());
-                }
-                table = &table[1 + size..];
-            }
-        }
+    loop {
+        let mut head = [0; 4];
+        file.read_exact(&mut head).ok()?;
+        let (marker, length) = (head[1], usize::from(u16::from_be_bytes([head[2], head[3]])));
         // Start of scan: the picture data follows, and no table came.
-        if marker == 0xDA {
+        if head[0] != 0xFF || length < 2 || marker == 0xDA {
             return None;
         }
-        at += 2 + length;
+        if marker != 0xDB {
+            file.seek_relative(length as i64 - 2).ok()?;
+            continue;
+        }
+        let mut segment = vec![0; length - 2];
+        file.read_exact(&mut segment).ok()?;
+        let mut table = segment.as_slice();
+        while let Some(&info) = table.first() {
+            let (wide, id) = (info >> 4 == 1, info & 0x0F);
+            let size = if wide { 128 } else { 64 };
+            let values = table.get(1..1 + size)?;
+            if id == 0 {
+                let read = |i: usize| if wide { u32::from(u16::from_be_bytes([values[2 * i], values[2 * i + 1]])) } else { u32::from(values[i]) };
+                return Some((0..64).map(read).collect());
+            }
+            table = &table[1 + size..];
+        }
     }
-    None
 }
 
 // ── Public API ────────────────────────────
@@ -71,9 +73,7 @@ pub fn fingerprint(file: &Path) -> Result<(u64, u32, u32), String> {
 /// A JPEG's quality from 1 to 100, estimated from how much its luminance table is scaled from the standard one.
 /// `None` for anything that isn't a JPEG with a table.
 pub fn jpeg_quality(file: &Path) -> Option<u8> {
-    let mut header = Vec::new();
-    BufReader::new(File::open(file).ok()?).take(HEADER_BYTES).read_to_end(&mut header).ok()?;
-    let table = luminance_table(&header)?;
+    let table = luminance_table(&mut BufReader::with_capacity(READ_AHEAD, File::open(file).ok()?))?;
     let scale = f64::from(table.iter().sum::<u32>()) * 100.0 / f64::from(STANDARD_LUMINANCE.iter().sum::<u32>());
     let quality = if scale <= 100.0 { (200.0 - scale) / 2.0 } else { 5000.0 / scale };
     Some(quality.round().clamp(1.0, 100.0) as u8)
@@ -122,6 +122,13 @@ mod tests {
             let estimate = jpeg_quality(&file).unwrap();
             assert!(estimate.abs_diff(quality) <= 2, "{quality} read as {estimate}");
         }
+        // A big EXIF segment before the tables is stepped over.
+        let plain = std::fs::read(dir.path().join("q75.jpg")).unwrap();
+        let mut exif = vec![0xFF, 0xD8, 0xFF, 0xE1, 0xEA, 0x62];
+        exif.resize(6 + 0xEA60, 0);
+        exif.extend_from_slice(&plain[2..]);
+        std::fs::write(dir.path().join("exif.jpg"), exif).unwrap();
+        assert_eq!(jpeg_quality(&dir.path().join("exif.jpg")), jpeg_quality(&dir.path().join("q75.jpg")));
         let png = dir.path().join("a.png");
         picture(8, 8).save_with_format(&png, ImageFormat::Png).unwrap();
         assert_eq!(jpeg_quality(&png), None);

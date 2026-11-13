@@ -1,0 +1,13 @@
+# Wallpapers: wallpaper sites and high-resolution photo sites.
+name = "Wallpapers"
+group = "Photos"
+web = false
+sites = [
+  "wallhaven.cc",
+  "wallpapercave.com",
+  "wallpaperaccess.com",
+  "alphacoders.com",
+  "unsplash.com",
+  "pexels.com",
+  "reddit.com",
+]

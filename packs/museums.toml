@@ -1,0 +1,14 @@
+# Museum art: open access museum collections and painting archives.
+name = "Museum art"
+group = "Art and design"
+web = false
+sites = [
+  "nga.gov",
+  "metmuseum.org",
+  "artic.edu",
+  "getty.edu",
+  "rijksmuseum.nl",
+  "wikiart.org",
+  "artvee.com",
+  "commons.wikimedia.org",
+]

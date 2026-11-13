@@ -10,6 +10,11 @@ repository = "https://github.com/nyaridev/scrappy"
 [workspace.dependencies]
 scrappy-core = { path = "crates/scrappy-core" }
 
+# Dev builds (`start-dev.bat`) optimize the dependencies: decoding pictures in the duplicate finder runs many times
+# slower without it. Scrappy's own crates stay quick to rebuild.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true

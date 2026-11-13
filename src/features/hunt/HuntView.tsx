@@ -1,45 +1,68 @@
-// HuntView: images on a topic from across the web: the topic, the pack and which of its places to search, a switch
-// per kind of image data, the limits, start and stop, live counts, the folder, and a duplicate scan of it when done.
+// HuntView: images on a topic from across the web: the topic, the pack (edited, made, removed and hidden in
+// `PackEditor`, ADR-0028), which image search engines and which of the pack's sites to search (a closed section until
+// opened), the kinds of image a site gives as a tray, each saying what it is on hover, the limits per source and the
+// most images they add up to, removing duplicates at the end, start and stop, and the hunt's progress with each
+// source's (`HuntProgress`).
 
 import {
   Button,
   Checkbox,
+  Collapsible,
   Field,
   Icon,
+  IconButton,
+  MultiSegmented,
   Notice,
   NumberField,
   Panel,
-  ProgressBar,
   Select,
-  Switch,
   TextField,
 } from "iro-ui";
-import { DuplicateIcon, SearchIcon, StopIcon } from "iro-ui/icons";
+import type { IconData } from "iro-ui/icons";
+import { CodeIcon, ImageIcon, LayersIcon, LinkIcon, PencilIcon, SearchIcon, ShareIcon, ZoomInIcon } from "iro-ui/icons";
 import { useEffect, useState } from "react";
+import { useSettings } from "../../app/SettingsProvider";
 import { useViewShown } from "../../app/viewShown";
 import { DuplicatesPanel } from "../../components/DuplicatesPanel";
-import { ShowInFolderButton } from "../../components/ShowInFolderButton";
+import { StopButton } from "../../components/StopButton";
+import { TipLabel } from "../../components/TipLabel";
 import { huntPacks } from "../../lib/backend";
 import { formatCount } from "../../lib/format";
+import { IMAGE_ENGINES } from "../../lib/imageEngines";
+import type { ImageEngine } from "../../lib/types/ImageEngine";
 import type { ImageKind } from "../../lib/types/ImageKind";
 import type { Packs } from "../../lib/types/Packs";
+import { HuntProgress } from "./HuntProgress";
+import { PackEditor, YOUR_PACKS } from "./PackEditor";
 import { useHunt } from "./useHunt";
+import "./hunt.css";
 
 // ── Constants ─────────────────────────────
-const KINDS: { kind: ImageKind; label: string }[] = [
-  { kind: "img", label: "Images" },
-  { kind: "responsive", label: "Lazy and high-res" },
-  { kind: "linked", label: "Full-size links" },
-  { kind: "background", label: "Backgrounds" },
-  { kind: "preview", label: "Preview image" },
-  { kind: "inline", label: "Inline SVG and data" },
+/** The kinds of image a site's pages give, each with what it is. */
+const KINDS: { kind: ImageKind; label: string; icon: IconData; tip: string }[] = [
+  { kind: "img", label: "Images", icon: ImageIcon, tip: "Pictures shown in the page's content." },
+  {
+    kind: "responsive",
+    label: "High-res",
+    icon: ZoomInIcon,
+    tip: "The larger and lazy-loaded versions a page has of its pictures. The largest is kept.",
+  },
+  { kind: "linked", label: "Full-size", icon: LinkIcon, tip: "Links around pictures that open the full-size file." },
+  { kind: "background", label: "Backgrounds", icon: LayersIcon, tip: "Pictures set as a background in the content." },
+  { kind: "preview", label: "Previews", icon: ShareIcon, tip: "The picture a page shows when it's shared (og:image)." },
+  {
+    kind: "inline",
+    label: "Inline",
+    icon: CodeIcon,
+    tip: "Pictures written into the page itself: SVG drawings and data: images. Mostly icons and logos.",
+  },
 ];
 const FIRST_KINDS: ImageKind[] = ["img", "responsive", "linked", "background", "preview"];
 
 // ── Types ─────────────────────────────────
 interface Limits {
   pages: number;
-  files: number;
+  perSource: number;
   minKb: number;
 }
 
@@ -51,15 +74,27 @@ let lastPacks: Packs | null = null;
 /** Hunt */
 export function HuntView() {
   const { hunt, start, stop } = useHunt();
+  const starts = useSettings().settings?.preferences?.starts.hunt;
   const [packs, setPacks] = useState<Packs | null>(lastPacks);
   const [topic, setTopic] = useState("");
   const [packId, setPackId] = useState("general");
   const [web, setWeb] = useState(true);
   // `null`: every site of the pack.
   const [sites, setSites] = useState<string[] | null>(null);
+  const [engines, setEngines] = useState<ImageEngine[]>(
+    () => starts?.engines ?? IMAGE_ENGINES.map(({ engine }) => engine),
+  );
   const [kinds, setKinds] = useState<ImageKind[]>(FIRST_KINDS);
-  const [limits, setLimits] = useState<Limits>({ pages: 10, files: 200, minKb: 20 });
+  const [removeDuplicates, setRemoveDuplicates] = useState(true);
+  const [limits, setLimits] = useState<Limits>(() => ({
+    pages: starts?.pages ?? 10,
+    perSource: starts?.perSource ?? 50,
+    minKb: starts?.minKb ?? 20,
+  }));
   const [duplicates, setDuplicates] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const { settings, saveHiddenPacks } = useSettings();
+  const hidden = settings?.hiddenPacks ?? [];
 
   const shown = useViewShown();
 
@@ -74,22 +109,52 @@ export function HuntView() {
       .catch(() => {});
   }, [shown]);
 
-  const pack = packs?.packs.find((one) => one.id === packId) ?? packs?.packs[0];
-  const picked = sites ?? pack?.sites ?? [];
+  // The Pack list leaves hidden packs out; a picked pack that's hidden gives way to the first shown one.
+  const shownPacks = (packs?.packs ?? []).filter((one) => !hidden.includes(one.id));
+  const pack = shownPacks.find((one) => one.id === packId) ?? shownPacks[0];
+  // Until the user ticks or unticks one: the pack's sites that are switched on.
+  const picked = sites ?? pack?.sites.filter((site) => !pack.off.includes(site)) ?? [];
   const running = hunt.state === "running";
-  const progress = hunt.state === "failed" || hunt.state === "idle" ? null : hunt.progress;
   const searchesWeb = web && (pack?.web ?? false);
-  const ready = topic.trim() !== "" && pack != null && (searchesWeb || picked.length > 0) && kinds.length > 0;
+  const pageSources = picked.length + (searchesWeb ? 1 : 0);
+  // The most a hunt saves: each source stops at its limit.
+  const most = (engines.length + pageSources) * limits.perSource;
+  // Engines give whole images: only sites need a kind of image picked.
+  const ready =
+    topic.trim() !== "" && pack != null && engines.length + pageSources > 0 && (pageSources === 0 || kinds.length > 0);
 
   const run = () => {
     if (!ready || running || !pack) return;
-    void start({ query: topic.trim(), pack: pack.id, web: searchesWeb, sites: picked, kinds, ...limits });
+    void start({
+      query: topic.trim(),
+      pack: pack.id,
+      web: searchesWeb,
+      sites: picked,
+      engines,
+      kinds,
+      removeDuplicates,
+      ...limits,
+    });
   };
 
   const choosePack = (id: string | null) => {
     setPackId(id ?? "general");
     setSites(null);
     setWeb(true);
+  };
+
+  const saved = (read: Packs) => {
+    lastPacks = read;
+    setPacks(read);
+    setSites(null);
+    setWeb(true);
+    setEditing(false);
+  };
+
+  // A new pack is picked; an edited one leaves the pick as it was.
+  const savedPack = (read: Packs, id: string, created: boolean) => {
+    saved(read);
+    if (created) setPackId(id);
   };
 
   const limit = (key: keyof Limits, label: string, min: number, max: number, step = 1) => (
@@ -107,7 +172,7 @@ export function HuntView() {
 
   if (duplicates && hunt.state === "done") {
     return (
-      <div className="hunt-duplicates">
+      <div className="duplicates-page">
         <DuplicatesPanel folder={hunt.folder} onClose={() => setDuplicates(false)} />
       </div>
     );
@@ -139,18 +204,40 @@ export function HuntView() {
             />
           </Field>
           <Field label="Pack">
-            <Select
-              options={(packs?.packs ?? []).map((one) => ({ value: one.id, label: one.name }))}
-              value={pack?.id ?? null}
-              onValueChange={choosePack}
-              disabled={running || !packs}
-            />
+            <div className="hunt-pack">
+              <Select
+                className="hunt-pack-select"
+                options={shownPacks.map((one) => ({ value: one.id, label: one.name, group: one.group ?? YOUR_PACKS }))}
+                value={pack?.id ?? null}
+                onValueChange={choosePack}
+                disabled={running || !packs}
+              />
+              <IconButton
+                icon={<Icon icon={PencilIcon} />}
+                label="Edit packs"
+                disabled={running || !packs}
+                onClick={() => setEditing(true)}
+              />
+            </div>
           </Field>
         </div>
         {pack && (
-          <Field label="Search">
+          <Collapsible tone="inset" title="Sources" summary={`${engines.length + pageSources} picked`}>
             <div className="hunt-sites">
-              {pack.web && <Checkbox label="The whole web" checked={web} onCheckedChange={setWeb} disabled={running} />}
+              {IMAGE_ENGINES.map(({ engine, label }) => (
+                <Checkbox
+                  key={engine}
+                  label={label}
+                  checked={engines.includes(engine)}
+                  disabled={running}
+                  onCheckedChange={(on) =>
+                    setEngines(on ? [...engines, engine] : engines.filter((one) => one !== engine))
+                  }
+                />
+              ))}
+              {pack.web && (
+                <Checkbox label="Any site (web search)" checked={web} onCheckedChange={setWeb} disabled={running} />
+              )}
               {pack.sites.map((site) => (
                 <Checkbox
                   key={site}
@@ -161,32 +248,38 @@ export function HuntView() {
                 />
               ))}
             </div>
-          </Field>
+          </Collapsible>
         )}
         <Field label="Image kinds">
-          <div className="hunt-kinds">
-            {KINDS.map(({ kind, label }) => (
-              <Switch
-                key={kind}
-                size="sm"
-                label={label}
-                checked={kinds.includes(kind)}
-                disabled={running}
-                onCheckedChange={(on) => setKinds(on ? [...kinds, kind] : kinds.filter((one) => one !== kind))}
-              />
-            ))}
-          </div>
+          <MultiSegmented
+            className="fill-segments"
+            aria-label="Image kinds"
+            options={KINDS.map(({ kind, label, icon, tip }) => ({
+              value: kind,
+              label: <TipLabel icon={icon} label={label} tip={tip} />,
+            }))}
+            value={kinds}
+            onValueChange={setKinds}
+            disabled={running}
+          />
         </Field>
         <div className="scrape-limits">
-          {limit("pages", "Pages per search", 1, 50)}
-          {limit("files", "Images", 1, 5000, 10)}
+          {limit("pages", "Pages per source", 1, 50)}
+          {limit("perSource", "Images per source", 1, 1000, 10)}
           {limit("minKb", "Smallest (KB)", 0, 100_000, 5)}
         </div>
         <div className="scrape-actions">
+          <Checkbox
+            className="hunt-dedupe"
+            label="Remove duplicates"
+            description="Keeps the best copy of each picture; the rest go to the trash."
+            checked={removeDuplicates}
+            disabled={running}
+            onCheckedChange={setRemoveDuplicates}
+          />
+          <span className="hunt-estimate">Up to {formatCount(most, "image")}</span>
           {running ? (
-            <Button icon={<Icon icon={StopIcon} />} onClick={stop}>
-              Stop
-            </Button>
+            <StopButton onStop={stop} />
           ) : (
             <Button variant="primary" icon={<Icon icon={SearchIcon} />} disabled={!ready} onClick={run}>
               Hunt
@@ -195,27 +288,20 @@ export function HuntView() {
         </div>
       </Panel>
 
-      {hunt.state !== "idle" && hunt.state !== "failed" && (
-        <Panel as="section" className="hunt-status" aria-label="Hunt progress">
-          {running && (
-            <ProgressBar label="Images saved" value={progress?.total ? progress.done / progress.total : null} />
-          )}
-          <div className="scrape-counts">
-            <span>
-              {hunt.state === "done" ? "Done" : hunt.state === "stopped" ? "Stopped" : "Hunting"}
-              {progress
-                ? `${hunt.state === "running" && progress.message ? ` · ${progress.message}` : ""} · ${formatCount(progress.done, "image")} saved`
-                : " · starting"}
-            </span>
-            <span className="scrape-folder selectable">{hunt.folder}</span>
-            <ShowInFolderButton path={hunt.folder} />
-            {hunt.state === "done" && (progress?.done ?? 0) > 1 && (
-              <Button size="sm" icon={<Icon icon={DuplicateIcon} />} onClick={() => setDuplicates(true)}>
-                Find duplicates
-              </Button>
-            )}
-          </div>
-        </Panel>
+      {editing && packs && (
+        <PackEditor
+          packs={packs.packs}
+          first={pack?.id ?? ""}
+          hidden={hidden}
+          onHidden={saveHiddenPacks}
+          onClose={() => setEditing(false)}
+          onSaved={savedPack}
+          onRemoved={saved}
+        />
+      )}
+
+      {hunt.state !== "idle" && (hunt.state !== "failed" || hunt.status.sources.length > 0) && (
+        <HuntProgress hunt={hunt} onDuplicates={() => setDuplicates(true)} />
       )}
     </div>
   );

@@ -1,5 +1,7 @@
-# Release: on a version tag, builds the installers and the portable Windows zip into a draft GitHub release, and
-# attaches the extension's zips (ADR-0014). Push a tag like v0.2.0 to run it.
+# Release: on a version tag, builds the signed installers and the updater's latest.json into a draft GitHub release,
+# and attaches the extension's zips (ADR-0014, ADR-0037). Push a tag like v0.2.0 to run it; publish the draft for the
+# app's updater to see it. Needs the TAURI_SIGNING_PRIVATE_KEY secret (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD only for a
+# key with a password; Scrappy's has none).
 name: Release
 
 on:
@@ -41,26 +43,20 @@ jobs:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      # A release without the updater's public key would ship updates nobody can check.
+      - name: Updater key is set
+        shell: bash
+        run: node -e "if (!require('./src-tauri/tauri.conf.json').plugins.updater.pubkey) { console.error('Set plugins.updater.pubkey in src-tauri/tauri.conf.json (ADR-0037).'); process.exit(1) }"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Scrappy ${{ github.ref_name }}
           releaseDraft: true
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
-      - name: Portable Windows zip
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          New-Item -ItemType Directory portable | Out-Null
-          Copy-Item target/release/scrappy.exe portable/Scrappy.exe
-          Copy-Item src-tauri/binaries/scrappy-host-x86_64-pc-windows-msvc.exe portable/scrappy-host.exe
-          $zip = "Scrappy_${{ github.ref_name }}_windows_portable.zip"
-          Compress-Archive -Path portable/* -DestinationPath $zip
-          gh release upload "${{ github.ref_name }}" $zip --clobber
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.updater.conf.json
 
   extension:
     needs: app

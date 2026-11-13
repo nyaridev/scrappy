@@ -1,0 +1,14 @@
+# History and archives: libraries, archives and public domain collections.
+name = "History and archives"
+group = "Science and history"
+web = false
+sites = [
+  "loc.gov",
+  "nypl.org",
+  "europeana.eu",
+  "si.edu",
+  "archive.org",
+  "rawpixel.com",
+  "commons.wikimedia.org",
+  "flickr.com",
+]

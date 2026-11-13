@@ -8,12 +8,12 @@ use interprocess::local_socket::tokio::{Stream, prelude::*};
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions};
 
 use super::frame;
-use super::message::{Checked, MediaKind, Reply, Request, check, check_grab};
+use super::message::{Checked, MediaKind, Reply, Request, check, check_grab, check_page, check_sign_in};
 use crate::grab::Inbox;
 use crate::jobs::Jobs;
-use crate::media::{Downloads, SendError};
+use crate::media::{Downloads, SendError, SentFrom};
 use crate::settings::Store;
-use crate::vault::Vault;
+use crate::vault::{self, Vault};
 
 // ── Types ─────────────────────────────────
 /// What answering the extension needs.
@@ -33,11 +33,62 @@ async fn answer(bridge: &Bridge, request: Request) -> Reply {
         Request::Hello => return Reply::Hello { version: env!("CARGO_PKG_VERSION").into() },
         Request::Grab { page_url, title, finds } => return hand(bridge, &page_url, title.as_deref(), finds),
         Request::Send { url, kind, page_url, title, headers, cookies } => (url, kind, page_url, title, headers, cookies),
+        Request::Look { url } => return look(bridge, &url).await,
+        Request::Site { url } => return site(bridge, &url),
+        Request::SignIn { url, cookies } => return sign_in(bridge, &url, cookies),
     };
     let checked = check(&url, kind, page_url.as_deref(), title.as_deref(), headers, cookies);
     match (checked, bridge.settings.library_root()) {
         (Err(message), _) | (_, Err(message)) => Reply::Error { message },
         (Ok(send), Ok(root)) => queue(bridge, send, root).await,
+    }
+}
+
+/// The largest thumbnail a look's answer carries, so it stays inside one frame.
+const MAX_LOOK_THUMBNAIL: usize = 600 * 1024;
+
+/// What downloading the page would save, as a site reader reads it (ADR-0042).
+async fn look(bridge: &Bridge, url: &str) -> Reply {
+    let url = match check_page(url) {
+        Ok(url) => url,
+        Err(message) => return Reply::Error { message },
+    };
+    match bridge.downloads.probes().look(&url).await {
+        Ok(Some(probe)) => Reply::Video {
+            title: probe.title,
+            channel: probe.channel,
+            duration: probe.duration,
+            thumbnail: probe.thumbnail.filter(|picture| picture.len() <= MAX_LOOK_THUMBNAIL),
+            count: probe.count,
+            files: probe.files,
+        },
+        Ok(None) => Reply::NotVideo,
+        Err(SendError::NeedsLogin { site, .. }) => Reply::NeedsCookies { site },
+        Err(error) => Reply::Error { message: error.message() },
+    }
+}
+
+/// The page's site and whether its sign-in is remembered.
+fn site(bridge: &Bridge, url: &str) -> Reply {
+    match check_page(url).map(|url| vault::site_of(&url)) {
+        Ok(Some(site)) => Reply::Site { signed_in: bridge.vault.cookies_for(&site).is_some(), site },
+        Ok(None) => Reply::Error { message: "This page has no site to sign in to.".into() },
+        Err(message) => Reply::Error { message },
+    }
+}
+
+/// Remembers a sign-in the user shared from the popup, without a download.
+fn sign_in(bridge: &Bridge, url: &str, cookies: Vec<vault::Cookie>) -> Reply {
+    let remembered = check_sign_in(url, cookies).and_then(|(site, cookies)| {
+        bridge.vault.remember(&site, cookies)?;
+        Ok(site)
+    });
+    match remembered {
+        Ok(site) => {
+            tracing::info!("The extension shared a sign-in");
+            Reply::SignedIn { site }
+        }
+        Err(message) => Reply::Error { message },
     }
 }
 
@@ -71,7 +122,8 @@ async fn queue(bridge: &Bridge, send: Checked, root: std::path::PathBuf) -> Repl
                 Some(grant) => Some(grant.cookies),
                 None => None,
             };
-            let result = bridge.downloads.send_video(&bridge.jobs, root, &send.url, send.headers, cookies).await;
+            let from = send.page_url.map(|page_url| SentFrom { page_url, title: send.title });
+            let result = bridge.downloads.send_video(&bridge.jobs, root, &send.url, from, send.headers, cookies).await;
             if let Err(SendError::NeedsLogin { site, .. }) = &result
                 && !given
             {

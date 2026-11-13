@@ -54,6 +54,11 @@ const MIME_FORMATS: Record<string, string> = {
   "image/svg+xml": "SVG",
 };
 
+/** Rough bytes per pixel of a web picture (JPEG, WEBP), and per pixel per second of a web video (about 0.1 bits a
+ * pixel at 30 frames): enough to sort small from large, never shown without `~` (ADR-0042). */
+const IMAGE_BYTES_PER_PIXEL = 0.25;
+const VIDEO_BYTES_PER_PIXEL_SECOND = 0.375;
+
 /** Pieces of a stream, never worth sending on their own. */
 const SEGMENTS = /\.(ts|m4s|aac|cmfv|cmfa)$/;
 const SEGMENT_TYPES = ["video/mp2t", "video/iso.segment", "audio/iso.segment"];
@@ -67,8 +72,10 @@ export interface Found {
   format: string | null;
   width?: number;
   height?: number;
-  /** Bytes, from the response. */
+  /** Bytes, from the response or the page's resource timing. */
   size?: number;
+  /** A video's length in seconds, from the page's player. */
+  duration?: number;
   /** The response's type, when the request was seen. */
   mime?: string;
   /** A picture to show for it: the image itself, or a video's poster. */
@@ -129,6 +136,23 @@ export function merge(...lists: Found[][]): Found[] {
     );
   }
   return [...byUrl.values()];
+}
+
+/** The stream worth sending for a page's video the page plays from a `blob:` (ADR-0035): its first HLS or DASH
+ * playlist (the master comes first), else its largest file, else none. */
+export function bestStream(found: Found[]): Found | undefined {
+  const videos = found.filter((one) => one.kind === "video");
+  const playlist = videos.find((one) => one.format === "HLS" || one.format === "DASH");
+  return playlist ?? videos.toSorted((a, b) => (b.size ?? 0) - (a.size ?? 0))[0];
+}
+
+/** Its size: known, else guessed from its pixels (and a video's length); `null` when there's nothing to go on. */
+export function sizeGuess(found: Found): { bytes: number; estimated: boolean } | null {
+  if (found.size) return { bytes: found.size, estimated: false };
+  if (!found.width || !found.height) return null;
+  const pixels = found.width * found.height;
+  if (found.kind === "image") return { bytes: pixels * IMAGE_BYTES_PER_PIXEL, estimated: true };
+  return found.duration ? { bytes: pixels * found.duration * VIDEO_BYTES_PER_PIXEL_SECOND, estimated: true } : null;
 }
 
 /** The last part of the link's path, for a row's name: `.../Sunset%20sky.jpg?w=2` → `Sunset sky.jpg`. */

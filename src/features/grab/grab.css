@@ -1,0 +1,30 @@
+/* Grab: the scan card; the results are `components/finds/finds.css`. */
+
+/* Wider than Download: the grid fits five tiles a row. */
+.grab {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 40));
+}
+
+.grab-card {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+/* Download as found, and with it Remove duplicates. */
+.grab-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-2) var(--iro-space-5);
+}
+
+/* What saving as found keeps across the row, and the most files beside it. */
+.grab-keep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--iro-space-6) * 5);
+  gap: var(--iro-space-3);
+  align-items: end;
+}

@@ -27,7 +27,7 @@ function MosaicPicture({ entry }: { entry: ListEntry }) {
   const [ref, src] = usePreview(entry.url);
   return (
     <span className="mosaic-cell" ref={ref}>
-      {src ? <img src={src} alt="" draggable={false} /> : <Icon icon={PlayIcon} size={16} />}
+      {src ? <img src={src} alt="" /> : <Icon icon={PlayIcon} size={16} />}
     </span>
   );
 }

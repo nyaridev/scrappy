@@ -122,6 +122,16 @@ pub(super) fn find(id: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|preset| preset.id == id)
 }
 
+/// The preset a send from the extension takes (ADR-0035): the start preset from Settings (`start`, by id; the first
+/// when unknown), or for a link with no video, that one when it's audio, else the first audio preset.
+pub(super) fn for_send(start: Option<&str>, has_video: bool) -> &'static Preset {
+    let start = start.and_then(find).unwrap_or(&PRESETS[0]);
+    if has_video || start.audio {
+        return start;
+    }
+    PRESETS.iter().find(|preset| preset.audio).unwrap_or(start)
+}
+
 impl Preset {
     /// yt-dlp's format choice: the best streams, capped at `max_height` for video. Falls back to the best there is
     /// when nothing is that small.
@@ -153,7 +163,17 @@ impl Encode {
 
 #[cfg(test)]
 mod tests {
-    use super::{PRESETS, find, presets};
+    use super::{PRESETS, find, for_send, presets};
+
+    #[test]
+    fn a_send_takes_the_start_preset_or_an_audio_one() {
+        assert_eq!(for_send(None, true).id, "editor-mp4");
+        assert_eq!(for_send(Some("hevc-mp4"), true).id, "hevc-mp4");
+        assert_eq!(for_send(Some("gone"), true).id, "editor-mp4");
+        assert_eq!(for_send(Some("hevc-mp4"), false).id, "mp3");
+        assert_eq!(for_send(Some("flac"), false).id, "flac");
+        assert_eq!(for_send(Some("flac"), true).id, "flac");
+    }
 
     #[test]
     fn ids_are_unique_and_the_default_comes_first() {

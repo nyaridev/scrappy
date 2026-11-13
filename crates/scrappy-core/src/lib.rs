@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod library;
 pub mod logging;
 pub mod media;
+pub mod net;
 pub mod settings;
 pub mod tools;
 pub mod vault;

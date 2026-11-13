@@ -1,4 +1,14 @@
-# Art styles: the whole web, plus art sites.
+# Art styles: art and illustration sites and portfolios.
 name = "Art styles"
-web = true
-sites = ["artstation.com", "deviantart.com", "behance.net", "wikiart.org"]
+group = "Art and design"
+web = false
+sites = [
+  "artstation.com",
+  "deviantart.com",
+  "behance.net",
+  "dribbble.com",
+  "pixiv.net",
+  "wikiart.org",
+  "pinterest.com",
+  "tumblr.com",
+]

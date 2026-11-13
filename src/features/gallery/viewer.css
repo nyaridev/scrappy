@@ -1,0 +1,186 @@
+/* Viewer: the Gallery's viewer, over the views (the bar, the stage with its side buttons) and its player (the video, the
+   controls laid over its foot, hidden while it plays and the pointer rests). */
+
+/* ── Viewer ────────────────────────────── */
+/* Over the views (`.views` in styles.css), under the header, so the window still drags and its buttons work. It has
+   no fill: it reads as one more view on the app's backdrop, with the Gallery under it faded out (kept, with its
+   scroll, for when the viewer closes). */
+.viewer {
+  position: absolute;
+  inset: 0;
+  /* iro-ui's dialog layer: its menus, tooltips (50) and toasts (60) show above. */
+  z-index: 40;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--iro-space-3);
+  padding: var(--iro-space-3) var(--iro-space-6) var(--iro-space-6);
+  outline: none;
+}
+
+.gallery > * {
+  transition: opacity var(--iro-dur) var(--iro-ease);
+}
+
+.gallery[data-viewing] > :not(.viewer) {
+  opacity: 0;
+}
+
+.viewer-bar {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+}
+
+.viewer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-place {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+  white-space: nowrap;
+}
+
+/* The file in the middle, a step button at each side. Every track is fixed (`minmax(0, 1fr)`), never sized by its
+   content, so the `100%` below is the stage's room and a tall picture or video can't grow past it. */
+.viewer-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--iro-space-2);
+  align-items: center;
+  min-height: 0;
+}
+
+/* No file that way: the arrow hides but keeps its place, so the file doesn't shift. */
+.viewer-step:disabled {
+  visibility: hidden;
+}
+
+.viewer-content {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viewer-picture {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--iro-radius-md);
+}
+
+/* ── Player ────────────────────────────── */
+.player {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--iro-sunken);
+  border-radius: var(--iro-radius-lg);
+}
+
+.player:fullscreen {
+  border-radius: 0;
+}
+
+.player[data-idle] {
+  cursor: none;
+}
+
+/* Pinned to the player's box, so a tall video can't size it: it scales down whole inside. */
+.player-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Audio has no picture: its icon and name stand in the middle. */
+.player-audio {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: var(--iro-space-3);
+  place-content: center;
+  justify-items: center;
+  color: var(--iro-fg-3);
+  pointer-events: none;
+}
+
+/* The controls over the foot of the picture, on a fade so they read on any frame. */
+.player-controls {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  gap: var(--iro-space-1);
+  padding: var(--iro-space-6) var(--iro-space-3) var(--iro-space-2);
+  background: linear-gradient(to top, var(--iro-overlay), transparent);
+  transition: opacity var(--iro-dur) var(--iro-ease);
+}
+
+.player[data-idle] .player-controls {
+  opacity: 0;
+}
+
+.player-row {
+  display: flex;
+  gap: var(--iro-space-1);
+  align-items: center;
+}
+
+.player-time {
+  padding-left: var(--iro-space-2);
+  color: var(--iro-fg-2);
+  font-family: var(--iro-font-mono);
+  font-size: var(--iro-text-xs);
+  white-space: nowrap;
+}
+
+.player-spacer {
+  flex: 1;
+}
+
+.player-volume {
+  width: calc(var(--iro-space-6) * 3);
+}
+
+/* Audio has no picture: a card with its icon and name over the controls, which always show. The controls are
+   positioned, so they sit above the (empty) video element and take the clicks. */
+.player[data-audio] {
+  place-items: stretch;
+  width: min(100%, calc(var(--iro-space-6) * 20));
+  height: auto;
+  background: var(--iro-surface);
+}
+
+.player[data-audio] .player-audio {
+  position: static;
+  padding: var(--iro-space-6) var(--iro-space-3) var(--iro-space-3);
+}
+
+.player[data-audio] .player-controls {
+  position: relative;
+  padding-top: 0;
+  background: none;
+}
+
+.player-failed {
+  display: grid;
+  gap: var(--iro-space-3);
+  justify-items: center;
+  color: var(--iro-fg-3);
+}

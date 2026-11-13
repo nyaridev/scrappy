@@ -1,8 +1,11 @@
 // Background: notes the video and audio each tab loads over the network (HLS and DASH playlists, files loaded by
 // scripts), with their size and allowed request headers, and hands a tab's list to the popup. Kept in memory only
-// and dropped when the tab navigates or closes (ADR-0006: no storage).
+// and dropped when the tab navigates or closes (ADR-0006: no storage). It also sends what an in-page button asks for
+// to the app, which content scripts can't reach (ADR-0035).
 
-import { type Found, formatOf, isMediaResponse, sizeOf } from "../lib/media";
+import { sendToApp } from "../lib/app";
+import type { DownloadAsk, Outcome } from "../lib/asks";
+import { bestStream, type Found, formatOf, isMediaResponse, sizeOf } from "../lib/media";
 import type { Header } from "../lib/types/Header";
 
 // ── Constants ─────────────────────────────
@@ -17,6 +20,39 @@ const TYPES = ["media", "xmlhttprequest", "other", "object"] as unknown as Brows
 export interface RequestsQuery {
   type: "requests";
   tabId: number;
+}
+
+// ── Private helpers ───────────────────────
+/** Whether a site reader knows `page`, so the page goes rather than a stream it loaded (ADR-0042). */
+async function knownPage(page: string): Promise<boolean> {
+  const reply = await sendToApp({ type: "look", url: page }).catch(() => null);
+  return reply?.type === "video" || reply?.type === "needsCookies";
+}
+
+/** Sends a button's link to the app: the link it named, else the page when a site reader knows it, else the tab's
+ * best stream, else the page itself. */
+async function download(ask: DownloadAsk, tab: Browser.tabs.Tab | undefined, found: Found[]): Promise<Outcome> {
+  const page = tab?.url;
+  if (!page) return { state: "failed", message: "This page can't be sent." };
+  const stream = ask.url || (await knownPage(page)) ? undefined : bestStream(found);
+  const url = ask.url ?? stream?.url ?? page;
+  const headers = stream?.headers ?? (url === page ? [] : [{ name: "Referer", value: page }]);
+  try {
+    const reply = await sendToApp({
+      type: "send",
+      url,
+      kind: "video",
+      pageUrl: page,
+      title: ask.title ?? tab?.title ?? null,
+      headers,
+      cookies: null,
+    });
+    if (reply.type === "queued") return { state: "sent" };
+    if (reply.type === "needsCookies") return { state: "needsSignIn", site: reply.site };
+    return { state: "failed", message: reply.type === "error" ? reply.message : "Scrappy didn't queue it." };
+  } catch (error) {
+    return { state: "failed", message: (error as Error).message };
+  }
 }
 
 export default defineBackground(() => {
@@ -70,8 +106,14 @@ export default defineBackground(() => {
   });
   browser.tabs.onRemoved.addListener((tabId) => byTab.delete(tabId));
 
-  browser.runtime.onMessage.addListener((message: RequestsQuery, _sender, reply) => {
-    if (message?.type !== "requests") return;
-    reply([...(byTab.get(message.tabId)?.values() ?? [])]);
+  browser.runtime.onMessage.addListener((message: RequestsQuery | DownloadAsk, sender, reply) => {
+    if (message?.type === "requests") {
+      reply([...(byTab.get(message.tabId)?.values() ?? [])]);
+    } else if (message?.type === "download") {
+      const found = [...(byTab.get(sender.tab?.id ?? -1)?.values() ?? [])];
+      void download(message, sender.tab, found).then(reply);
+      // The answer comes later: keeps the channel open for it.
+      return true;
+    }
   });
 });

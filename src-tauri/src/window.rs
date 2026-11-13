@@ -1,15 +1,25 @@
-//! Window: builds the main window with the frame core picked (ADR-0011), so it never shows with the wrong one, and
-//! brings it forward when Scrappy is started a second time.
+//! Window: builds the main window with the frame core picked (ADR-0011), so it never shows with the wrong one,
+//! minimized or hidden in the tray when the system started Scrappy (ADR-0036, ADR-0038), and brings it forward when
+//! Scrappy is started a second time or the tray asks.
 
 use scrappy_core::app::WindowFrame;
 use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const MAIN: &str = "main";
 
-/// Opens the main window with `frame`.
-pub fn open(app: &App, frame: WindowFrame) -> tauri::Result<()> {
+/// How the window first shows.
+pub enum Shown {
+    Normal,
+    Minimized,
+    /// Only the tray icon shows.
+    Hidden,
+}
+
+/// Opens the main window with `frame`, shown as `shown` says.
+pub fn open(app: &App, frame: WindowFrame, shown: Shown) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("Scrappy")
+        .visible(!matches!(shown, Shown::Hidden))
         .inner_size(1200.0, 780.0)
         .min_inner_size(820.0, 560.0)
         .center();
@@ -19,7 +29,10 @@ pub fn open(app: &App, frame: WindowFrame) -> tauri::Result<()> {
         WindowFrame::Overlay => builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true),
         _ => builder,
     };
-    builder.build()?;
+    let window = builder.build()?;
+    if matches!(shown, Shown::Minimized) {
+        window.minimize()?;
+    }
     Ok(())
 }
 

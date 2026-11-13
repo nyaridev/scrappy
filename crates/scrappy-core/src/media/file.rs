@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 
 use super::download::{Taken, relative, reserve};
 use super::engine;
-use crate::app::USER_AGENT;
+use crate::net;
 use crate::jobs::{Job, JobPhase};
 use crate::library::{self, template};
 use crate::vault;
@@ -136,10 +136,9 @@ fn extension_in(url: &str) -> Option<String> {
 }
 
 async fn fetch(order: &FileOrder, base: &Path, job: &Job) -> Result<(PathBuf, u64), String> {
-    let client = reqwest::Client::builder()
+    let client = net::client()
         .connect_timeout(TIMEOUT)
         .read_timeout(TIMEOUT)
-        .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("Can't start the download: {e}"))?;
     let mut request = client.get(&order.url);

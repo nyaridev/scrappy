@@ -1,5 +1,5 @@
-// DuplicateGroup: one group of copies side by side, the best first and marked; a checkbox on each picks it for the
-// trash. Right-click: Open, Show in folder.
+// DuplicateGroup: one group of copies side by side, the best first and marked; a click anywhere on a copy (its picture,
+// name or checkbox) picks it for the trash. Right-click: Open, Show in folder.
 
 import { Badge, Checkbox, ContextMenu, Icon, Image, Skeleton, Tooltip } from "iro-ui";
 import { ImageIcon } from "iro-ui/icons";
@@ -29,9 +29,10 @@ function Copy({
   return (
     <ContextMenu items={fileMenu(picture.path)}>
       <li className="copy" data-picked={picked || undefined}>
-        <span className="copy-thumb">
+        {/* The checkbox is the control keyboards and screen readers use; the picture is a bigger place to click. */}
+        <button type="button" className="copy-thumb" tabIndex={-1} aria-hidden onClick={() => onPick(!picked)}>
           {thumb === undefined ? (
-            <Skeleton className="tile-thumb" />
+            <Skeleton className="tile-thumb" height="auto" />
           ) : thumb ? (
             <Image className="tile-thumb" src={thumb} alt="" ratio={16 / 9} fit="contain" />
           ) : (
@@ -44,7 +45,7 @@ function Copy({
               Best
             </Badge>
           )}
-        </span>
+        </button>
         <Checkbox
           checked={picked}
           onCheckedChange={onPick}

@@ -1,7 +1,9 @@
 # ADR-0006: Browser extension: a quick-send popup over native messaging
 
 **Status:** Accepted; who registers the host is superseded by
-[ADR-0014](0014-builds-installers-and-host-registration.md) (the app does, from Settings).
+[ADR-0014](0014-builds-installers-and-host-registration.md) (the app does, from Settings); a content script adds
+Download buttons to pages, and a sent video uses the Settings start preset: [ADR-0035](0035-in-page-download-buttons.md);
+the `look`, `site` and `signIn` messages: [ADR-0042](0042-extension-reads-the-page-first.md).
 **Date:** 2026-11-10
 
 ## Context
@@ -34,7 +36,7 @@ requests a page actually made (HLS/DASH chunks, media loaded by JavaScript) with
 | `nativeMessaging` | The only way to the app: `connectNative` starts scrappy-host |
 | `webRequest` (non-blocking) | Sees the media a page loads by script (HLS and DASH playlists, files), with their size and the Referer, Origin and User-Agent they were requested with. Chrome needs `extraHeaders` to show Referer and Origin |
 | `scripting` | Runs the page scan (videos, images, `srcset`, preview tags, CSS backgrounds) when the popup opens |
-| `<all_urls>` (host) | `webRequest` and the scan work on any site. Firefox asks for it in the popup the first time |
+| `<all_urls>` (host) | `webRequest`, the scan and the in-page buttons (ADR-0035) work on any site. Firefox asks for it in the popup the first time |
 | `cookies` | Reads one site's cookies, only after the app answered `needsCookies` for that site and the user picked "Use once" or "Remember" in the popup (ADR-0005). Only `lib/cookies.ts` calls it |
 
 No `tabs` or `storage`. The tab's address and title come with the host permission. The requests the

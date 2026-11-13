@@ -1,5 +1,6 @@
 // Cookies: one site's cookies from the browser, read only after the app asked for that site and the user agreed in
-// the popup (ADR-0005). Nothing else in the extension reads cookies.
+// the popup, or when the user shares the tab's site's sign-in there (ADR-0005, ADR-0042). Nothing else in the
+// extension reads cookies.
 
 import type { Cookie } from "./types/Cookie";
 

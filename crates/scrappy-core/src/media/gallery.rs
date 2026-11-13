@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::download::{Found, Saved, record_file, relative, size_of};
+use super::download::{Found, Saved, collection, record_file, relative, size_of, types_of};
 use super::engine;
 use super::probe::{PREVIEW_ITEMS, Probe};
 use crate::jobs::Job;
@@ -22,6 +22,7 @@ const LIST_LIMIT: u32 = 50;
 const FOLDER: &str = "Social";
 const ARCHIVE: &str = ".scrappy/gallery-dl.sqlite3";
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "avif"];
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "mov", "m4v"];
 /// gallery-dl's message types in `-J` output.
 const MESSAGE_ERROR: i64 = -1;
 const MESSAGE_URL: i64 = 3;
@@ -42,6 +43,8 @@ pub(super) struct Listing {
     pub items: Vec<String>,
     /// The first image, for a preview.
     pub preview: Option<String>,
+    /// The first video: its first frame is the preview when there's no image.
+    pub video: Option<String>,
 }
 
 /// Everything one gallery-dl run needs.
@@ -69,7 +72,8 @@ fn user_of(fields: &Value) -> Option<String> {
 /// Reads `-J` output: the files, or the error gallery-dl reported.
 fn parse_listing(json: &str) -> Result<Listing, String> {
     let messages: Vec<Value> = serde_json::from_str(json).map_err(|_| "gallery-dl's answer couldn't be read.".to_string())?;
-    let mut listing = Listing { site: None, user: None, count: 0, more: false, items: Vec::new(), preview: None };
+    let mut listing =
+        Listing { site: None, user: None, count: 0, more: false, items: Vec::new(), preview: None, video: None };
     for message in &messages {
         let kind = message.get(0).and_then(Value::as_i64);
         let fields = message.as_array().and_then(|parts| parts.last()).unwrap_or(&Value::Null);
@@ -87,8 +91,13 @@ fn parse_listing(json: &str) -> Result<Listing, String> {
         if listing.items.len() < PREVIEW_ITEMS && !name.is_empty() {
             listing.items.push(if ext.is_empty() { name.to_string() } else { format!("{name}.{ext}") });
         }
-        if listing.preview.is_none() && IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-            listing.preview = message.get(1).and_then(Value::as_str).map(str::to_string);
+        let link = || message.get(1).and_then(Value::as_str).map(str::to_string);
+        let ext = ext.to_lowercase();
+        if listing.preview.is_none() && IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+            listing.preview = link();
+        }
+        if listing.video.is_none() && VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+            listing.video = link();
         }
     }
     listing.more = listing.count >= LIST_LIMIT;
@@ -131,6 +140,7 @@ impl Listing {
             items: self.items.clone(),
             sections: Vec::new(),
             entries: Vec::new(),
+            video: None,
         }
     }
 }
@@ -164,7 +174,7 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
     command.args(["--", &order.url]);
 
     let total = order.total.or(order.limit).map(u64::from);
-    let (mut files, mut skipped, mut folder, mut failed, mut bytes) = (0u32, 0u32, None, None, 0u64);
+    let (mut saved_files, mut skipped, mut folder, mut failed, mut bytes) = (Vec::new(), 0u32, None, None, 0u64);
     let (ok, errors) = engine::run_lines(command, "gallery-dl", job, |line| {
         let (path, saved) = match line.strip_prefix(SKIPPED_MARK) {
             Some(path) => (PathBuf::from(path.trim()), false),
@@ -178,7 +188,7 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
             let found = Found { kind: "social", url: &order.url, site, user, transferred: None };
             bytes += size_of(&path).unwrap_or(0);
             match record_file(&order.root, &path, found, None) {
-                Ok(_) => files += 1,
+                Ok(_) => saved_files.push(path.clone()),
                 Err(error) => failed = Some(error),
             }
         } else {
@@ -186,17 +196,18 @@ pub(super) async fn run(toolbox: &Toolbox, order: GalleryOrder, job: &Job) -> Re
         }
         folder = folder.take().or_else(|| path.parent().map(|dir| relative(&order.root, dir)));
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
-        job.items(u64::from(files + skipped), total, name);
+        job.items(saved_files.len() as u64 + u64::from(skipped), total, name);
     })
     .await?;
     if let Some(error) = failed {
         return Err(error);
     }
-    if files + skipped == 0 {
+    if saved_files.is_empty() && skipped == 0 {
         return Err(if ok { "There was nothing to download.".into() } else { engine::error_text(&errors) });
     }
-    tracing::info!("Saved {files} files with gallery-dl ({skipped} already saved)");
-    Ok(Saved { path: folder, files: Some(files), skipped: Some(skipped), bytes: Some(bytes) })
+    tracing::info!("Saved {} files with gallery-dl ({skipped} already saved)", saved_files.len());
+    let types = types_of(&saved_files);
+    Ok(Saved { types, ..collection(&order.root, folder, &saved_files, skipped, bytes) })
 }
 
 #[cfg(test)]
@@ -218,6 +229,7 @@ mod tests {
         assert_eq!(listing.user.as_deref(), Some("bsky.app"));
         assert_eq!(listing.items, ["a1.jpeg", "b2.mp4"]);
         assert_eq!(listing.preview.as_deref(), Some("https://cdn.example/a"));
+        assert_eq!(listing.video.as_deref(), Some("https://cdn.example/b"));
     }
 
     #[test]

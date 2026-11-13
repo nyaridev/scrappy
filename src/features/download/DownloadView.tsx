@@ -1,33 +1,55 @@
-// DownloadView: paste a link, Rust checks it (Enter or the arrow) and shows what's there until the next check; pick
-// a preset and quality (for a playlist or profile, how many; for a playlist or channel, which lists and videos),
-// download. A single video shows the size it will download. The kept downloads are listed below, with Clear all.
+// DownloadView: paste a link, Rust checks it (Enter or the arrow) and shows what's there until the next check; a list
+// shows from its first videos and grows in place until it's listed or stopped (ADR-0030). Pick a preset and quality,
+// starting on those Settings names (ADR-0034) (for a playlist or profile, how many; for a playlist or channel, which lists and videos), download. A single video
+// shows the size it will download. Its ten latest downloads are listed below under their heading; every download is
+// in the Downloads view (ADR-0018).
 
-import { Button, Field, Icon, IconButton, Panel, Select, TextField } from "iro-ui";
-import { ArrowRightIcon, DownloadIcon, LinkIcon } from "iro-ui/icons";
-import { useEffect, useState } from "react";
+import { Button, Field, Icon, IconButton, Panel, SectionTitle, Select, TextField } from "iro-ui";
+import { ArrowRightIcon, DownloadIcon, HistoryIcon, LinkIcon } from "iro-ui/icons";
+import { useEffect, useMemo, useState } from "react";
+import { DOWNLOADS, useOpenView } from "../../app/openView";
+import { useSettings } from "../../app/SettingsProvider";
 import { useCached } from "../../app/useCached";
-import { downloadSize, presets, probeUrl } from "../../lib/backend";
+import { useDownloads } from "../../app/useDownloads";
+import { DownloadQueue } from "../../components/DownloadQueue";
+import { StopButton } from "../../components/StopButton";
+import { downloadSize, presets } from "../../lib/backend";
 import { formatBytes } from "../../lib/format";
 import type { Probe } from "../../lib/types/Probe";
 import type { Section } from "../../lib/types/Section";
-import { DownloadQueue } from "./DownloadQueue";
 import { ListTiles } from "./ListTiles";
 import { ProbeCard } from "./ProbeCard";
-import { useDownloads } from "./useDownloads";
+import { useLinkCheck } from "./useLinkCheck";
+import "./download.css";
 
 // ── Constants ─────────────────────────────
 const BEST = "best";
 const ALL = "all";
 /** The "First N" choices for a playlist or profile. */
-const AMOUNTS = [10, 25, 50, 100];
+const AMOUNTS = [10, 25, 50, 100, 150, 200, 300, 500];
+/** How many of this view's downloads it lists. */
+const LATEST = 10;
 
 // ── Private helpers ───────────────────────
+/** While listing, a list with no count of its own is counted as listed so far: more may come. */
+function growing(list: { count: number | null; entries: unknown[] }, listing: boolean): boolean {
+  return listing && list.count != null && list.entries.length >= list.count;
+}
+
 /** The lists to show as tiles: a channel's sections, or a playlist as one list; none for anything else. */
-function listsOf(probe: Probe | null): Section[] {
+function listsOf(probe: Probe | null, listing: boolean): Section[] {
   if (!probe) return [];
-  if (probe.sections.length > 0) return probe.sections;
-  if (probe.files || probe.count == null) return [];
-  return [{ url: probe.url, title: "Videos", count: probe.count, more: probe.more, entries: probe.entries }];
+  const lists =
+    probe.sections.length > 0 || probe.files || probe.count == null
+      ? probe.sections
+      : [{ url: probe.url, title: "Videos", count: probe.count, more: probe.more, entries: probe.entries }];
+  return lists.map((list) => ({ ...list, more: list.more || growing(list, listing) }));
+}
+
+/** The quality a link starts on: the highest it has up to `most` (Settings), else Best. */
+function startQuality(heights: number[], most: number | null): string {
+  const fits = most == null ? [] : heights.filter((height) => height <= most);
+  return fits.length > 0 ? String(Math.max(...fits)) : BEST;
 }
 
 // ── Public API ────────────────────────────
@@ -36,27 +58,34 @@ export function DownloadView() {
   const [link, setLink] = useState("");
   // The link as it was checked: Enter downloads while the field still holds it, and checks again once it changes.
   const [checkedLink, setCheckedLink] = useState("");
-  const [probe, setProbe] = useState<Probe | null>(null);
-  const [checking, setChecking] = useState(false);
+  const { probe, running, error: checkError, check: checkLink, stop, clear } = useLinkCheck();
   const [linkError, setLinkError] = useState<string | null>(null);
   const [allPresets] = useCached("presets", presets);
+  // `null`: what Settings starts on.
   const [presetId, setPresetId] = useState<string | null>(null);
-  const [quality, setQuality] = useState(BEST);
+  const [chosenQuality, setQuality] = useState<string | null>(null);
+  const media = useSettings().settings?.preferences?.media;
   const [amount, setAmount] = useState(ALL);
   const [starting, setStarting] = useState(false);
-  const [sections, setSections] = useState<string[]>([]);
+  // A channel's lists turned off; lists that show up while listing start on.
+  const [sectionsOff, setSectionsOff] = useState<string[]>([]);
   const [skip, setSkip] = useState<string[]>([]);
   const [size, setSize] = useState<number | null>(null);
-  const { entries, progress, start, cancel, remove, clear } = useDownloads();
+  const { entries, progress, start, cancel, remove } = useDownloads();
+  const openView = useOpenView();
+  const latest = useMemo(() => entries.filter((entry) => entry.source === "download").slice(0, LATEST), [entries]);
 
-  const preset = allPresets?.find((p) => p.id === presetId) ?? allPresets?.[0] ?? null;
+  const listing = running && probe != null;
+  const preset = allPresets?.find((p) => p.id === (presetId ?? media?.preset)) ?? allPresets?.[0] ?? null;
+  const quality = chosenQuality ?? startQuality(probe?.heights ?? [], media?.maxHeight ?? null);
   const maxHeight = quality === BEST || preset?.audio ? null : Number(quality);
   const qualityOptions = [
     { value: BEST, label: "Best" },
     ...(probe?.heights ?? []).map((height) => ({ value: String(height), label: `${height}p` })),
   ];
-  const lists = listsOf(probe);
+  const lists = listsOf(probe, listing);
   const hasSections = (probe?.sections.length ?? 0) > 0;
+  const sections = hasSections ? lists.map((list) => list.url).filter((url) => !sectionsOff.includes(url)) : [];
   const picked = hasSections ? lists.filter((list) => sections.includes(list.url)) : lists;
   const skipped = new Set(skip);
   const count =
@@ -64,7 +93,6 @@ export function DownloadView() {
       ? picked.reduce((sum, list) => sum + list.count - list.entries.filter((e) => skipped.has(e.url)).length, 0)
       : (probe?.count ?? null);
   const more = lists.length > 0 ? picked.some((list) => list.more) : probe?.more;
-  const finished = entries.some((entry) => entry.state !== "queued" && entry.state !== "running");
   const amountOptions =
     count == null
       ? []
@@ -87,25 +115,15 @@ export function DownloadView() {
     };
   }, [probe, preset, maxHeight]);
 
-  async function check() {
-    const url = link.trim();
-    if (!url || checking) return;
-    setChecking(true);
+  function check(url = link.trim()) {
+    if (!url || (running && !probe)) return;
     setLinkError(null);
-    setProbe(null);
-    try {
-      const found = await probeUrl(url);
-      setProbe(found);
-      setCheckedLink(url);
-      setSections(found.sections.map((section) => section.url));
-      setSkip([]);
-      setQuality(BEST);
-      setAmount(ALL);
-    } catch (e) {
-      setLinkError(String(e));
-    } finally {
-      setChecking(false);
-    }
+    setCheckedLink(url);
+    setSectionsOff([]);
+    setSkip([]);
+    setQuality(null);
+    setAmount(ALL);
+    void checkLink(url);
   }
 
   async function download() {
@@ -118,11 +136,12 @@ export function DownloadView() {
         preset: preset.id,
         maxHeight,
         limit: amount === ALL ? null : Number(amount),
-        sections: hasSections ? sections : [],
+        sections,
         skip,
       });
       setLink("");
-      setProbe(null);
+      // A download started while listing doesn't need the rest of the list (ADR-0030).
+      clear();
     } catch (e) {
       setLinkError(String(e));
     } finally {
@@ -133,7 +152,7 @@ export function DownloadView() {
   return (
     <div className="download">
       <Panel as="section" className="download-card" aria-label="New download">
-        <Field label="Link" error={linkError ?? undefined}>
+        <Field label="Link" error={linkError ?? checkError ?? undefined}>
           <TextField
             value={link}
             onChange={(event) => setLink(event.target.value)}
@@ -148,9 +167,9 @@ export function DownloadView() {
               <IconButton
                 icon={<Icon icon={ArrowRightIcon} />}
                 label="Check link"
-                loading={checking}
+                loading={running && !probe}
                 disabled={!link.trim()}
-                onClick={check}
+                onClick={() => check()}
               />
             }
           />
@@ -158,12 +177,15 @@ export function DownloadView() {
 
         {probe && (
           <>
-            <ProbeCard probe={probe} showItems={lists.length === 0} />
+            <ProbeCard
+              probe={{ ...probe, more: probe.more || lists.some((list) => list.more) }}
+              showItems={lists.length === 0}
+            />
             {lists.length > 0 && (
               <ListTiles
                 lists={lists}
                 on={hasSections ? sections : null}
-                onOnChange={setSections}
+                onOnChange={(on) => setSectionsOff(lists.map((list) => list.url).filter((url) => !on.includes(url)))}
                 skip={skip}
                 onSkipChange={setSkip}
               />
@@ -194,6 +216,20 @@ export function DownloadView() {
               )}
             </div>
             <div className="download-actions">
+              <span className="download-start">
+                {listing && <StopButton onStop={stop} />}
+                {probe.video && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setLink(probe.video ?? "");
+                      check(probe.video ?? "");
+                    }}
+                  >
+                    Just this video
+                  </Button>
+                )}
+              </span>
               {size != null && <span className="download-size">About {formatBytes(size)}</span>}
               <Button
                 variant="primary"
@@ -209,14 +245,17 @@ export function DownloadView() {
         )}
       </Panel>
 
-      {entries.length > 0 && (
-        <section className="downloads" aria-label="Downloads">
+      {latest.length > 0 && (
+        <section className="downloads" aria-labelledby="download-latest">
           <div className="downloads-head">
-            <Button size="sm" variant="ghost" disabled={!finished} onClick={clear}>
-              Clear all
+            <SectionTitle id="download-latest" icon={<Icon icon={HistoryIcon} />}>
+              {latest.length === 1 ? "Last download" : `Last ${latest.length} downloads`}
+            </SectionTitle>
+            <Button size="sm" variant="ghost" onClick={() => openView(DOWNLOADS)}>
+              All downloads
             </Button>
           </div>
-          <DownloadQueue entries={entries} progress={progress} onCancel={cancel} onRemove={remove} />
+          <DownloadQueue entries={latest} progress={progress} onCancel={cancel} onRemove={remove} />
         </section>
       )}
     </div>

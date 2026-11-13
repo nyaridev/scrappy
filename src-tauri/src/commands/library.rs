@@ -1,10 +1,12 @@
-//! Library commands: where the library stands, picking or checking its folder, setting it up, its numbers and recent
-//! downloads, the gallery's pages, thumbnails and pictures, and opening a file or showing it in the file manager. Core
-//! checks every path, typed or picked.
+//! Library commands: where the library stands, picking or checking its folder, setting it up or switching to another,
+//! moving it as a job (ADR-0039), its numbers and recent downloads, the gallery's pages, thumbnails and pictures, opening a file or showing it in the file manager, and
+//! deleting a file or downloaded folder. Core checks every path, typed or picked.
 
 use scrappy_core::library::{self, Disk, FolderCheck, GalleryPage, GalleryQuery, LibraryStatus, RecentDownload, Stats};
-use scrappy_core::media::Thumbnails;
+use scrappy_core::jobs::{JobId, Jobs};
+use scrappy_core::media::{Downloads, Thumbnails};
 use scrappy_core::settings::Store;
+use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -31,10 +33,25 @@ pub fn check_folder(path: String) -> Result<FolderCheck, String> {
     library::check(&path)
 }
 
-/// Sets up the library at `path`.
+/// Sets up the library at `path`, at first run or to switch to another folder; the Gallery lists the new one.
 #[tauri::command(async)]
-pub fn setup_library(settings: State<Store>, path: String) -> Result<LibraryStatus, String> {
-    library::setup(&path, &settings)
+pub fn setup_library(app: AppHandle, settings: State<Store>, path: String) -> Result<LibraryStatus, String> {
+    let status = library::setup(&path, &settings)?;
+    crate::events::library_watcher(app)();
+    Ok(status)
+}
+
+/// Starts moving the library to `path` as a job; refused while downloads run. Returns the job's id.
+#[tauri::command(async)]
+pub fn move_library(
+    app: AppHandle,
+    settings: State<Store>,
+    jobs: State<Arc<Jobs>>,
+    downloads: State<Downloads>,
+    path: String,
+) -> Result<JobId, String> {
+    let on_change = crate::events::library_watcher(app);
+    library::start_move(&jobs, settings.inner().clone(), &path, downloads.busy(), on_change)
 }
 
 /// The library's totals and the last 30 days.
@@ -54,6 +71,13 @@ pub fn recent_downloads(settings: State<Store>, limit: u32) -> Result<Vec<Recent
 pub fn show_in_folder(settings: State<Store>, path: String) -> Result<(), String> {
     let file = library::locate(&settings.library_root()?, &path)?;
     tauri_plugin_opener::reveal_item_in_dir(file).map_err(|e| format!("Can't open the folder: {e}"))
+}
+
+/// Deletes a library file, or a downloaded folder with everything in it, for good. Core checks the path stays inside
+/// the library and isn't one of its own folders.
+#[tauri::command(async)]
+pub fn delete_from_library(settings: State<Store>, path: String) -> Result<(), String> {
+    library::remove(&settings.library_root()?, &path)
 }
 
 /// Opens a library file in the system's default app for it. Core checks the path stays inside the library.

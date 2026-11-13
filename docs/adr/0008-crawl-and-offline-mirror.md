@@ -1,6 +1,7 @@
 # ADR-0008: Crawl and offline mirror
 
-**Status:** Accepted
+**Status:** Accepted; crawling a site for its files moved to Grab (ADR-0031), which scans with the browser only (ADR-0032); a mirror's
+images and videos are picked after its crawl (ADR-0033)
 **Date:** 2026-11-10
 
 ## Context

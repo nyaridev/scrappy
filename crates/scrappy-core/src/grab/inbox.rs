@@ -46,7 +46,9 @@ mod tests {
         let inbox = Inbox::new(Arc::new(move || {
             count.fetch_add(1, Ordering::SeqCst);
         }));
-        let page = |url: &str| PageScan { url: url.into(), title: None, finds: Vec::new() };
+        let page = |url: &str| {
+            PageScan { url: url.into(), title: None, finds: Vec::new(), pages: 1, kept: Default::default() }
+        };
         inbox.hand(page("https://a.com/"));
         inbox.hand(page("https://b.com/"));
         assert_eq!(told.load(Ordering::SeqCst), 2);

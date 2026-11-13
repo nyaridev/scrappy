@@ -1,15 +1,26 @@
 // Views: the pages the header switches between. Add a view here and give it a folder in `src/features/`.
 
 import type { IconData } from "iro-ui/icons";
-import { DownloadIcon, GlobeIcon, HomeIcon, ImagesIcon, SearchIcon, SettingsIcon, TargetIcon } from "iro-ui/icons";
+import {
+  DownloadIcon,
+  GlobeIcon,
+  HomeIcon,
+  ImagesIcon,
+  SearchIcon,
+  SettingsIcon,
+  TargetIcon,
+  TrayInIcon,
+} from "iro-ui/icons";
 import type { ComponentType } from "react";
 import { DownloadView } from "../features/download/DownloadView";
+import { DownloadsView } from "../features/downloads/DownloadsView";
 import { GalleryView } from "../features/gallery/GalleryView";
 import { GrabView } from "../features/grab/GrabView";
 import { HomeView } from "../features/home/HomeView";
 import { HuntView } from "../features/hunt/HuntView";
 import { ScrapeView } from "../features/scrape/ScrapeView";
 import { SettingsView } from "../features/settings/SettingsView";
+import { DOWNLOADS, SETTINGS } from "./openView";
 
 // ── Types ─────────────────────────────────
 export interface View {
@@ -30,5 +41,8 @@ export const MAIN_VIEWS: View[] = [
   { id: "gallery", label: "Gallery", icon: ImagesIcon, Page: GalleryView },
 ];
 
-/** Settings, opened from the button at the header's right. */
-export const SETTINGS_VIEW: View = { id: "settings", label: "Settings", icon: SettingsIcon, Page: SettingsView };
+/** Every download (ADR-0018) and Settings, opened from the icon buttons at the header's right, in order. */
+export const HEADER_VIEWS: View[] = [
+  { id: DOWNLOADS, label: "Downloads", icon: TrayInIcon, Page: DownloadsView },
+  { id: SETTINGS, label: "Settings", icon: SettingsIcon, Page: SettingsView },
+];

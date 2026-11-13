@@ -13,18 +13,20 @@ export function showFile(path: string) {
   );
 }
 
+/** Opens a library file in its default app. */
+export function openInApp(path: string) {
+  openFile(path).catch((error) =>
+    toast({ tone: "error", title: "Couldn't open the file", description: String(error) }),
+  );
+}
+
 /** Open and Show in folder for a library file; `open` replaces opening it in its default app. */
 export function fileMenu(path: string, open?: () => void): MenuEntry[] {
   return [
     {
       label: "Open",
       icon: <Icon icon={ExternalLinkIcon} />,
-      onSelect:
-        open ??
-        (() =>
-          openFile(path).catch((error) =>
-            toast({ tone: "error", title: "Couldn't open the file", description: String(error) }),
-          )),
+      onSelect: open ?? (() => openInApp(path)),
     },
     { label: "Show in folder", icon: <Icon icon={FolderOpenIcon} />, onSelect: () => showFile(path) },
   ];

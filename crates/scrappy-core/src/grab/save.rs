@@ -1,21 +1,26 @@
 //! Save: the finds the user picked, queued as downloads into `Grabs/<domain>/<date>/` (ADR-0004, ADR-0007). Files are
-//! fetched as they are; streams go through yt-dlp.
+//! fetched as they are; streams go through yt-dlp. With "Remove duplicates" on, one more job waits for the picked
+//! pictures, then moves the folder's extra copies to the trash (ADR-0029).
 
 // ── Imports ───────────────────────────────
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::find::{FindKind, MAX_FINDS};
-use crate::jobs::{JobId, Jobs};
+use crate::dedupe;
+use crate::jobs::{Job, JobId, Jobs};
 use crate::library::{self, template};
-use crate::media::{Downloads, SaveRequest};
+use crate::media::{DownloadSource, DownloadState, Downloads, Row, SaveRequest};
 use crate::vault;
 
 // ── Constants ─────────────────────────────
 const FOLDER: &str = "Grabs/{site}/{upload_date}";
+/// How often the duplicate removal checks whether the picked pictures have ended.
+const WAIT_EVERY: Duration = Duration::from_millis(500);
 
 // ── Types ─────────────────────────────────
 /// What the window asks Grab to download.
@@ -28,6 +33,9 @@ pub struct GrabRequest {
     /// The page's title: a stream's file name.
     pub title: Option<String>,
     pub finds: Vec<Pick>,
+    /// Once the picked pictures are saved, move the folder's extra copies to the trash, keeping each picture's best.
+    #[serde(default)]
+    pub remove_duplicates: bool,
 }
 
 /// One picked find.
@@ -51,7 +59,7 @@ pub struct Picked {
 }
 
 // ── Private helpers ───────────────────────
-fn catalog_kind(kind: FindKind) -> &'static str {
+pub(super) fn catalog_kind(kind: FindKind) -> &'static str {
     match kind {
         FindKind::Video | FindKind::Stream => "video",
         FindKind::Audio => "audio",
@@ -61,7 +69,7 @@ fn catalog_kind(kind: FindKind) -> &'static str {
 }
 
 /// `Grabs/<domain>/<date>`; the date folder alone when the page has no domain.
-fn folder(site: Option<&str>, today: &str) -> PathBuf {
+pub(super) fn folder(site: Option<&str>, today: &str) -> PathBuf {
     let fields = template::Fields {
         site: site.map(str::to_string),
         upload_date: Some(today.to_string()),
@@ -76,8 +84,33 @@ fn stream_title(title: Option<&str>, name: &str) -> String {
     title.map(str::trim).filter(|title| !title.is_empty()).map_or(stem, str::to_string)
 }
 
+/// Waits until the downloads `ids` have ended (or left the list), then moves the extra copies in `folder` to the trash
+/// with strict matching (ADR-0029). Returns how many it moved.
+async fn remove_after(
+    downloads: Downloads,
+    root: PathBuf,
+    folder: String,
+    ids: Vec<JobId>,
+    job: Job,
+) -> Result<u64, String> {
+    let waiting = |entry: &crate::media::DownloadEntry| {
+        ids.contains(&entry.id) && matches!(entry.state, DownloadState::Queued | DownloadState::Running)
+    };
+    while downloads.list().iter().any(waiting) {
+        if job.cancelled() {
+            return Err("Cancelled.".into());
+        }
+        tokio::time::sleep(WAIT_EVERY).await;
+    }
+    let removed = tokio::task::spawn_blocking(move || dedupe::remove_copies(&root, &folder, &job))
+        .await
+        .map_err(|e| format!("The duplicate scan stopped: {e}"))??;
+    Ok(u64::from(removed))
+}
+
 // ── Public API ────────────────────────────
-/// Queues each pick in `request` into the library at `root`. One that can't start doesn't stop the rest.
+/// Queues each pick in `request` into the library at `root`. One that can't start doesn't stop the rest. With
+/// "Remove duplicates" on and pictures picked, a "Remove duplicates" row follows them (ADR-0029).
 pub async fn save(
     downloads: &Downloads,
     jobs: &Arc<Jobs>,
@@ -90,8 +123,10 @@ pub async fn save(
     let site = vault::site_of(&request.page_url);
     let folder = folder(site.as_deref(), &library::today()?);
     let mut picked = Vec::with_capacity(request.finds.len());
+    let mut pictures = Vec::new();
     for pick in request.finds {
         let stream = pick.kind == FindKind::Stream;
+        let picture = pick.kind == FindKind::Image;
         let save = SaveRequest {
             url: pick.url.clone(),
             page_url: request.page_url.clone(),
@@ -105,7 +140,19 @@ pub async fn save(
             Ok(entry) => (Some(entry.id), None),
             Err(error) => (None, Some(error)),
         };
+        if picture && let Some(id) = id {
+            pictures.push(id);
+        }
         picked.push(Picked { url: pick.url, id, error });
+    }
+    if request.remove_duplicates && pictures.len() > 1 {
+        let folder = folder.to_string_lossy().replace('\\', "/");
+        let title = request.title.or(site).unwrap_or_else(|| request.page_url.clone());
+        let kind = "Remove duplicates".to_string();
+        let row = Row { source: DownloadSource::Grab, url: request.page_url, title, kind, thumbnail: None };
+        let watched = downloads.clone();
+        let kept = folder.clone();
+        downloads.track(jobs, row, folder, move |job| remove_after(watched, root, kept, pictures, job));
     }
     Ok(picked)
 }
@@ -139,8 +186,12 @@ mod tests {
         let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
         let downloads = Downloads::new(Toolbox::new(dir.path().join("tools")), vault);
         let pick = Pick { url: "https://www.w3schools.com/html/mov_bbb.mp4".into(), kind: FindKind::Video, name: "mov_bbb.mp4".into() };
-        let request =
-            GrabRequest { page_url: "https://www.w3schools.com/html/html5_video.asp".into(), title: None, finds: vec![pick] };
+        let request = GrabRequest {
+            page_url: "https://www.w3schools.com/html/html5_video.asp".into(),
+            title: None,
+            finds: vec![pick],
+            remove_duplicates: false,
+        };
         let picked = save(&downloads, &jobs, root.clone(), request).await.unwrap();
         assert!(picked[0].id.is_some(), "{picked:?}");
         while *finished.lock().unwrap() < 1 {

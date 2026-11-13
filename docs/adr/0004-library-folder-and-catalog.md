@@ -1,6 +1,7 @@
 # ADR-0004: The library folder and its catalog
 
-**Status:** Accepted; the Gallery reads the folder, not the catalog: [ADR-0015](0015-gallery-from-the-library-folder.md)
+**Status:** Accepted; the Gallery reads the folder, not the catalog: [ADR-0015](0015-gallery-from-the-library-folder.md);
+the settings file holds the preferences: [ADR-0034](0034-preferences.md)
 **Date:** 2026-11-10
 
 ## Context

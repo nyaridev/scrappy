@@ -1,6 +1,5 @@
-// useCrawl: one crawl, mirror or page save at a time: start it, follow its job (files saved of the limit, pages
-// visited) and its end. The job is followed outside the view, so one that ends while another view is open shows its
-// end on return.
+// useCrawl: one crawl, mirror or page save at a time: start it, follow its job (files saved, pages visited) and its
+// end. The job is followed outside the view, so one that ends while another view is open shows its end on return.
 
 import { useCallback, useEffect, useState } from "react";
 import { cancelJob, crawlSite, onJobFinished, onJobProgress } from "../../lib/backend";
@@ -59,8 +58,8 @@ export function useCrawl() {
 
   const start = useCallback(async (request: CrawlRequest) => {
     try {
-      const { id, folder, open } = await crawlSite(request);
-      const started = { folder, open, mode: request.mode };
+      const { id, site, folder, open } = await crawlSite(request);
+      const started = { site, folder, open, mode: request.mode };
       set({ state: "running", id, ...started, progress: null });
       follow(id, started);
     } catch (e) {

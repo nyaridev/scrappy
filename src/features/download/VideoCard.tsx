@@ -15,7 +15,7 @@ export function VideoCard({ entry, picked, onToggle }: { entry: ListEntry; picke
       <button type="button" className="video-card-button" aria-pressed={picked} onClick={onToggle}>
         <span className="video-card-thumb" ref={ref}>
           {src ? (
-            <img src={src} alt="" draggable={false} />
+            <img src={src} alt="" />
           ) : (
             <span className="video-card-empty" data-loading={src === undefined || undefined}>
               <Icon icon={PlayIcon} size={20} />

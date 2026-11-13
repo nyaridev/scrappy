@@ -21,6 +21,7 @@ static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\w+)\}").
 
 // ── Types ─────────────────────────────────
 /// The facts a template can use. A missing one renders as nothing, and a folder left empty by it is dropped.
+/// `site` is the registrable domain of the video's page (`youtube.com`), the folder videos are filed in (ADR-0042).
 #[derive(Debug, Clone, Default)]
 pub struct Fields {
     pub title: Option<String>,
@@ -48,13 +49,16 @@ fn lookup<'a>(fields: &'a Fields, name: &str) -> Option<Option<&'a str>> {
     Some(value.as_deref())
 }
 
+/// Fills one part; brackets a missing field left empty go too (`title [{id}]` without an id is `title`).
 fn fill(part: &str, fields: &Fields) -> String {
-    PLACEHOLDER
-        .replace_all(part, |caps: &Captures| match lookup(fields, &caps[1]) {
-            Some(value) => value.unwrap_or_default().to_string(),
-            None => caps[0].to_string(),
-        })
-        .into_owned()
+    let filled = PLACEHOLDER.replace_all(part, |caps: &Captures| match lookup(fields, &caps[1]) {
+        Some(value) => value.unwrap_or_default().to_string(),
+        None => caps[0].to_string(),
+    });
+    if filled == part {
+        return filled.into_owned();
+    }
+    filled.replace("[]", "").replace("()", "")
 }
 
 // ── Public API ────────────────────────────
@@ -113,6 +117,12 @@ mod tests {
     fn fills_and_drops_empty_folders() {
         let path = render("Videos/{channel}/{playlist}/{title} [{id}]", &video());
         assert_eq!(path, PathBuf::from_iter(["Videos", "Rock Channel", "AC_DC_ Live_ [abc123]"]));
+    }
+
+    #[test]
+    fn leaves_no_empty_brackets() {
+        let fields = Fields { title: Some("Clip".into()), ..Fields::default() };
+        assert_eq!(render("{site}/{title} [{id}] ({user})", &fields), PathBuf::from("Clip"));
     }
 
     #[test]

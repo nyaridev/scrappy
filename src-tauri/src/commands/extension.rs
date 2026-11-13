@@ -1,4 +1,5 @@
-//! Extension commands: which browsers reach this app, and connecting or disconnecting them (ADR-0014).
+//! Extension commands: which browsers reach this app, connecting or disconnecting them (ADR-0014), and the
+//! extension's files for this version, fetched from its release and opened in the file manager (ADR-0040).
 
 use std::path::PathBuf;
 
@@ -32,4 +33,21 @@ pub fn connect_browsers(app: AppHandle) -> Result<HostStatus, String> {
 pub fn disconnect_browsers(app: AppHandle) -> Result<HostStatus, String> {
     let (dir, data) = folders(&app)?;
     Ok(bridge::disconnect(&dir, &data))
+}
+
+/// The folder with the extension for this version, once it's been downloaded.
+#[tauri::command(async)]
+pub fn extension_files(app: AppHandle) -> Result<Option<String>, String> {
+    let (_, data) = folders(&app)?;
+    let folder = bridge::extension_files(&data, &app.package_info().version.to_string());
+    Ok(folder.map(|folder| folder.to_string_lossy().into_owned()))
+}
+
+/// Downloads the extension for this version when it isn't there yet, then opens its folder. Returns the folder.
+#[tauri::command]
+pub async fn open_extension_files(app: AppHandle) -> Result<String, String> {
+    let (_, data) = folders(&app)?;
+    let folder = bridge::fetch_extension(&data, &app.package_info().version.to_string()).await?;
+    tauri_plugin_opener::open_path(&folder, None::<&str>).map_err(|e| format!("Can't open the folder: {e}"))?;
+    Ok(folder.to_string_lossy().into_owned())
 }

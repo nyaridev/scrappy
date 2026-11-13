@@ -1,19 +1,18 @@
-//! Test site: a tiny local web server for the crawl and hunt tests, and a request with test limits.
+//! Test site: a tiny local web server for the crawl, Grab and Hunt tests, and a crawl request with test limits.
 
 // ── Imports ───────────────────────────────
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{CrawlMode, CrawlRequest};
-use crate::grab::FindKind;
 
 // ── Types ─────────────────────────────────
 /// A path's content type and body, given the site's address; `None` answers 404.
 pub type Route = fn(&str, &str) -> Option<(&'static str, Vec<u8>)>;
 
 // ── Public API ────────────────────────────
-/// A crawl request for `url` with roomy limits, no delay, images only, 1 KB smallest.
+/// A crawl request for `url` with roomy limits and no delay.
 pub fn request(url: &str, mode: CrawlMode) -> CrawlRequest {
-    CrawlRequest { url: url.into(), mode, depth: 3, pages: 50, files: 50, delay_ms: 0, kinds: vec![FindKind::Image], min_kb: 1 }
+    CrawlRequest { url: url.into(), mode, depth: 3, pages: 50, delay_ms: 0 }
 }
 
 /// Serves `route` on a free local port; returns the site's address, ending in `/`.

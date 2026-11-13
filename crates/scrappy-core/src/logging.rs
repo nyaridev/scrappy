@@ -91,7 +91,16 @@ pub fn init(log_dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::redact;
+    use super::{init, redact};
+
+    #[test]
+    fn writes_the_log_file() {
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path()).unwrap();
+        tracing::info!("Queued a download from the extension");
+        let text = std::fs::read_to_string(dir.path().join(super::LOG_FILE)).unwrap();
+        assert!(text.contains("started") && text.contains("Queued a download"), "{text}");
+    }
 
     #[test]
     fn hides_cookies_and_auth_headers() {

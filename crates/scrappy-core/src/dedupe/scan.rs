@@ -1,10 +1,13 @@
 //! Scan: duplicate removal over the library as a job. Each picture in the catalog is hashed once (the hash is kept in
 //! the catalog), then grouped; the window takes the groups when the job ends. Copies the user lets go move to the
-//! system trash and leave the catalog; nothing is deleted outright (ADR-0009).
+//! system trash and leave the catalog; nothing is deleted outright (ADR-0009). A hunt can remove its folder's copies
+//! itself, with strict matching (ADR-0027).
 
 // ── Imports ───────────────────────────────
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Deserialize;
@@ -13,9 +16,16 @@ use ts_rs::TS;
 use super::fingerprint::{fingerprint, jpeg_quality};
 use super::group::{Picture, Strictness, groups};
 use crate::jobs::{Job, JobId, Jobs};
-use crate::library;
+use crate::library::{self, ImageRow};
+
+// ── Constants ─────────────────────────────
+/// Pictures hashed at once: each holds its decoded picture (a 24-megapixel photo is about 100 MB) while it's hashed.
+const MAX_WORKERS: usize = 8;
 
 // ── Types ─────────────────────────────────
+/// A picture's perceptual hash, width and height, as the catalog keeps them.
+type Fingerprint = (u64, u32, u32);
+
 /// What to look through, and how alike copies must be.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -32,45 +42,93 @@ pub struct Duplicates {
     found: Arc<Mutex<HashMap<JobId, Vec<Vec<Picture>>>>>,
 }
 
+// ── State ─────────────────────────────────
+/// How alike copies must be when a hunt or a grab removes them on its own (ADR-0034): `Strictness` as a number.
+static AUTO: AtomicU8 = AtomicU8::new(0);
+
 // ── Private helpers ───────────────────────
-/// Hashes what isn't hashed yet and groups everything. Blocking: decoding pictures is CPU work.
-fn find(root: &std::path::Path, request: &DuplicateRequest, job: &Job) -> Result<Vec<Vec<Picture>>, String> {
+/// A catalog row as a picture, hashed when the catalog has no hash for it yet (the new hash comes back to be kept).
+/// `None` for a file that's gone or can't be read. Blocking: decoding a picture is CPU work.
+fn picture(root: &Path, row: ImageRow) -> Option<(Picture, Option<Fingerprint>)> {
+    let file = root.join(&row.path);
+    if !file.is_file() {
+        return None;
+    }
+    let (known, made) = match row.fingerprint {
+        Some(known) => (known, None),
+        None => match fingerprint(&file) {
+            Ok(made) => (made, Some(made)),
+            Err(error) => {
+                tracing::warn!("Skipped a picture duplicate removal can't read: {error}");
+                return None;
+            }
+        },
+    };
+    let name = row.path.rsplit('/').next().unwrap_or(&row.path).to_string();
+    let format = row.path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_uppercase()).unwrap_or_default();
+    let (hash, width, height) = known;
+    let quality = jpeg_quality(&file);
+    Some((Picture { path: row.path, name, width, height, bytes: row.bytes, format, quality, hash }, made))
+}
+
+/// Hashes what isn't hashed yet, on every core, keeps the new hashes (also when cancelled, so the work isn't lost)
+/// and groups everything. Blocking: decoding pictures is CPU work.
+fn find(root: &Path, request: &DuplicateRequest, job: &Job) -> Result<Vec<Vec<Picture>>, String> {
     let rows = library::images(root, request.folder.as_deref())?;
     let total = rows.len() as u64;
-    let mut pictures = Vec::with_capacity(rows.len());
-    for (index, row) in rows.into_iter().enumerate() {
-        if job.cancelled() {
-            return Err("Cancelled.".into());
-        }
-        let file = root.join(&row.path);
-        let name = row.path.rsplit('/').next().unwrap_or(&row.path).to_string();
-        job.items(index as u64, Some(total), Some(name.clone()));
-        if !file.is_file() {
-            continue;
-        }
-        let known = match row.fingerprint {
-            Some(known) => known,
-            None => match fingerprint(&file) {
-                Ok(made) => {
-                    library::set_fingerprint(root, &row.path, made)?;
-                    made
-                }
-                Err(error) => {
-                    tracing::warn!("Skipped a picture duplicate removal can't read: {error}");
-                    continue;
-                }
-            },
-        };
-        let format = row.path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_uppercase()).unwrap_or_default();
-        let (hash, width, height) = known;
-        let quality = jpeg_quality(&file);
-        pictures.push(Picture { path: row.path, name, width, height, bytes: row.bytes, format, quality, hash });
+    let (next, done) = (AtomicUsize::new(0), AtomicU64::new(0));
+    let cores = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
+    let cores = cores.min(MAX_WORKERS).min(rows.len()).max(1);
+    let mut read: Vec<(usize, Picture, Option<Fingerprint>)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..cores)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut read = Vec::new();
+                    while !job.cancelled() {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(row) = rows.get(index) else { break };
+                        let name = row.path.rsplit('/').next().map(str::to_string);
+                        if let Some((picture, made)) = picture(root, row.clone()) {
+                            read.push((index, picture, made));
+                        }
+                        job.items(done.fetch_add(1, Ordering::Relaxed) + 1, Some(total), name);
+                    }
+                    read
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|worker| worker.join().unwrap_or_default()).collect()
+    });
+    let made: Vec<(String, Fingerprint)> =
+        read.iter().filter_map(|(_, picture, made)| made.map(|made| (picture.path.clone(), made))).collect();
+    library::set_fingerprints(root, &made)?;
+    if job.cancelled() {
+        return Err("Cancelled.".into());
     }
     job.items(total, Some(total), None);
-    Ok(groups(pictures, request.strictness))
+    read.sort_by_key(|(index, ..)| *index);
+    Ok(groups(read.into_iter().map(|(_, picture, _)| picture).collect(), request.strictness))
+}
+
+/// Every copy but the best of each group in `folder`, matched as strictly as set: the ones a hunt removes.
+fn extra_copies(root: &Path, folder: &str, job: &Job) -> Result<Vec<String>, String> {
+    let set = usize::from(AUTO.load(Ordering::Relaxed));
+    let strictness = [Strictness::Strict, Strictness::Normal, Strictness::Loose][set];
+    let request = DuplicateRequest { folder: Some(folder.to_string()), strictness };
+    Ok(find(root, &request, job)?.into_iter().flat_map(|group| group.into_iter().skip(1).map(|picture| picture.path)).collect())
 }
 
 // ── Public API ────────────────────────────
+/// How alike copies must be when a hunt or a grab removes them on its own.
+pub fn set_auto_strictness(strictness: Strictness) {
+    let index = match strictness {
+        Strictness::Strict => 0,
+        Strictness::Normal => 1,
+        Strictness::Loose => 2,
+    };
+    AUTO.store(index, Ordering::Relaxed);
+}
+
 impl Duplicates {
     /// Starts a scan of the library at `root` as a job and returns its id; take the groups with `take` once it ends.
     /// Must be called inside a Tokio runtime.
@@ -93,9 +151,20 @@ impl Duplicates {
     }
 }
 
+/// Moves every copy but the best of each group of strict duplicates in `folder` (relative to the library `root`) to
+/// the system trash; returns how many moved. Reports hashing progress on `job`. Blocking: decoding pictures is CPU
+/// work.
+pub fn remove_copies(root: &Path, folder: &str, job: &Job) -> Result<u32, String> {
+    let copies = extra_copies(root, folder, job)?;
+    if copies.is_empty() {
+        return Ok(0);
+    }
+    trash(root, &copies)
+}
+
 /// Moves the library files at `paths` to the system trash and drops them from the catalog. Returns how many moved;
 /// one that can't move stops the rest, and those already moved stay forgotten.
-pub fn trash(root: &std::path::Path, paths: &[String]) -> Result<u32, String> {
+pub fn trash(root: &Path, paths: &[String]) -> Result<u32, String> {
     let mut moved = Vec::new();
     let mut failed = None;
     for path in paths {
@@ -188,6 +257,28 @@ mod tests {
         assert!(groups[0][1].quality.is_some());
         assert!(duplicates.take(id).is_none());
         assert!(library::images(&root, None).unwrap().iter().all(|row| row.fingerprint.is_some()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn picks_a_folders_extra_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::create_dir_all(root.join(".scrappy")).unwrap();
+        add(&root, "Images/cats/cat.png", &picture(false), ImageFormat::Png);
+        add(&root, "Images/cats/cat.jpg", &picture(false), ImageFormat::Jpeg);
+        add(&root, "Images/cats/other.png", &picture(true), ImageFormat::Png);
+        add(&root, "Images/dogs/cat.jpg", &picture(false), ImageFormat::Jpeg);
+
+        let (send, mut found) = tokio::sync::mpsc::unbounded_channel();
+        let jobs = Jobs::new(Arc::new(|_| {}));
+        let folder_root = root.clone();
+        jobs.start(move |job| async move {
+            let extra = tokio::task::spawn_blocking(move || super::extra_copies(&folder_root, "Images/cats", &job)).await.unwrap();
+            let _ = send.send(extra);
+            Ok(())
+        });
+        // The PNG is kept over the JPEG; the other folder's copy isn't looked at.
+        assert_eq!(found.recv().await.unwrap().unwrap(), ["Images/cats/cat.jpg"]);
     }
 
     #[test]

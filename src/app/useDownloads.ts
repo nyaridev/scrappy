@@ -6,7 +6,6 @@
 // extension sends show up when their first progress arrives.
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { useViewActive } from "../../app/viewShown";
 import {
   cancelJob,
   clearDownloads,
@@ -15,11 +14,13 @@ import {
   onJobProgress,
   removeDownload,
   startDownload,
-} from "../../lib/backend";
-import { coalesce } from "../../lib/coalesce";
-import type { DownloadEntry } from "../../lib/types/DownloadEntry";
-import type { DownloadRequest } from "../../lib/types/DownloadRequest";
-import type { JobProgress } from "../../lib/types/JobProgress";
+} from "../lib/backend";
+import { coalesce } from "../lib/coalesce";
+import type { DownloadEntry } from "../lib/types/DownloadEntry";
+import type { DownloadRequest } from "../lib/types/DownloadRequest";
+import type { DownloadSource } from "../lib/types/DownloadSource";
+import type { JobProgress } from "../lib/types/JobProgress";
+import { useViewActive } from "./viewShown";
 
 // ── Constants ─────────────────────────────
 const PROGRESS_MS = 200;
@@ -102,7 +103,8 @@ const ACTIONS = {
     keep([...[...snapshot.entries].reverse(), ...(await startDownload(request))]),
   cancel: (id: number) => void cancelJob(id),
   remove: (id: number) => void removeDownload(id).then(keep),
-  clear: () => void clearDownloads().then(keep),
+  /** Removes the finished rows, or only those from `source`. */
+  clear: (source: DownloadSource | null = null) => void clearDownloads(source).then(keep),
 };
 
 // ── Public API ────────────────────────────

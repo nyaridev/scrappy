@@ -1,32 +1,31 @@
-//! Downloads: the download list (kept on disk when the app asks, ADR-0016), the links probed so far (so a download
-//! reuses the probe instead of asking the site again), the queue downloads wait in (ADR-0010), and the sign-ins they
-//! use: one given for this download, else the site's remembered one (ADR-0005). A link becomes one video, a playlist
+//! Downloads: the download list (kept on disk when the app asks, ADR-0016), the queue downloads wait in (ADR-0010),
+//! and the sign-ins they use: one given for this download, else the site's remembered one (ADR-0005). Each link's
+//! probe comes from `probes`, so a download reuses it instead of asking the site again. A link becomes one video, a playlist
 //! or a gallery-dl collection, as its route and probe say; a channel's picked sections become one download each.
-//! The queue's size and the speed limit come from the settings (ADR-0017).
+//! The queue's size and the speed limit come from the settings (ADR-0017). Scrapes and hunts get rows too, through
+//! `track`, and every row says where it came from (ADR-0018).
 
 // ── Imports ───────────────────────────────
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::download::{self, Order, Saved, Taken, size_of};
+use super::download::{self, Order, Saved, Taken, size_of, types_of};
 use super::download_list::DownloadList;
 use super::engine;
 use super::gallery::{self, GalleryOrder};
 use super::file::{self, FileOrder, TOO_SMALL};
 use super::playlist::{self, PlaylistOrder};
 use super::presets::{self, Preset};
-use super::probe::{self, Info, Probe};
-use super::route::{self, Engine};
+use super::probe;
+use super::probes::{Probed, Probes, classify};
 use crate::jobs::{Job, JobId, Jobs, Queue};
 use crate::library::template::{self, Fields};
 use crate::settings::DownloadLimits;
 use crate::tools::Toolbox;
-use crate::vault::{self, Cookie, CookieFile, Vault};
+use crate::vault::{Cookie, Vault};
 
 // ── Constants ─────────────────────────────
 /// The preset column for an image sent from the extension.
@@ -37,10 +36,6 @@ const FILES_PRESET: &str = "Original files";
 const FILE_PRESET: &str = "Original file";
 /// How many files of a playlist or profile a send from the extension saves.
 const EXTENSION_LIMIT: u32 = 50;
-/// How many listed videos' thumbnails are fetched at once.
-const PREVIEWS_AT_ONCE: usize = 6;
-/// A probe's stream links expire after some hours; an older probe is done again.
-const PROBE_KEPT: Duration = Duration::from_secs(60 * 60);
 
 // ── Types ─────────────────────────────────
 /// What the window asks to download.
@@ -75,12 +70,29 @@ pub enum DownloadState {
     Cancelled,
 }
 
+/// Where a download came from: the view or the extension that started it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum DownloadSource {
+    /// The Download view; also rows kept from before sources were.
+    #[default]
+    Download,
+    Grab,
+    Scrape,
+    Hunt,
+    Extension,
+}
+
 /// One download in the list. Progress arrives as job events with the same id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct DownloadEntry {
     pub id: JobId,
+    #[serde(default)]
+    pub source: DownloadSource,
+    /// The link; empty for a hunt.
     pub url: String,
     pub title: String,
     /// The preset's name.
@@ -88,7 +100,8 @@ pub struct DownloadEntry {
     pub state: DownloadState,
     /// A small `data:` URL from the probe.
     pub thumbnail: Option<String>,
-    /// The saved file, or the folder a playlist or profile went to, relative to the library root.
+    /// The saved file, or the folder a playlist or profile went to, relative to the library root. Until a single
+    /// video is saved: the folder it goes to.
     pub file: Option<String>,
     /// For a playlist or profile: the files saved.
     pub files: Option<u32>,
@@ -97,7 +110,32 @@ pub struct DownloadEntry {
     /// Bytes on disk of what it saved; `None` until it's done, and for rows kept from before sizes were.
     #[ts(type = "number | null")]
     pub size: Option<u64>,
+    /// Why it failed; on a done row, a note on how it was saved (kept without audio).
     pub error: Option<String>,
+    /// For files kept as they are (no preset): their types, most common first (`MP4`, `JPG`); shown in the preset's
+    /// place.
+    #[serde(default)]
+    pub types: Vec<String>,
+}
+
+/// What a link comes with: the page's headers, a sign-in given for it, the row's source, and the page it was sent
+/// from.
+type Given<'a> = (Vec<(String, String)>, Option<Vec<Cookie>>, DownloadSource, Option<&'a SentFrom>);
+
+/// The page the extension sent a link from, and its title: a plain stream is named after them (ADR-0042).
+pub struct SentFrom {
+    pub page_url: String,
+    pub title: Option<String>,
+}
+
+/// A new row: where it came from, its link and title, and what the list's preset column shows.
+pub struct Row {
+    pub source: DownloadSource,
+    pub url: String,
+    pub title: String,
+    /// The preset's name, or the kind of job ("Mirror", "Images").
+    pub kind: String,
+    pub thumbnail: Option<String>,
 }
 
 /// A link Grab picked, saved into `folder` as one job.
@@ -126,36 +164,23 @@ pub enum SendError {
     Failed(String),
 }
 
-/// A size estimate's link, preset id and height.
-type SizeKey = (String, &'static str, Option<u32>);
-
-/// A link's probe, kept for its download.
-#[derive(Clone)]
-struct Probed {
-    at: Instant,
-    /// yt-dlp's JSON; empty for gallery-dl's links.
-    json: String,
-    probe: Probe,
-}
-
 /// The downloads and what they share.
 #[derive(Clone)]
 pub struct Downloads {
     toolbox: Toolbox,
-    vault: Vault,
+    probes: Probes,
     queue: Queue,
     entries: Arc<Mutex<Vec<DownloadEntry>>>,
     list: DownloadList,
-    probed: Arc<Mutex<HashMap<String, Probed>>>,
-    /// Listed videos' thumbnail links, by video link, and the pictures fetched so far.
-    previews: Arc<Mutex<HashMap<String, String>>>,
-    pictures: Arc<Mutex<HashMap<String, Option<String>>>>,
-    fetching: Arc<tokio::sync::Semaphore>,
-    sizes: Arc<Mutex<HashMap<SizeKey, Option<u64>>>>,
     taken: Taken,
 }
 
 // ── Private helpers ───────────────────────
+/// A row for the list.
+fn row(source: DownloadSource, url: String, title: String, kind: &str, thumbnail: Option<String>) -> Row {
+    Row { source, url, title, kind: kind.to_string(), thumbnail }
+}
+
 /// Done, failed or stopped: it can leave the list.
 fn finished(entry: &DownloadEntry) -> bool {
     !matches!(entry.state, DownloadState::Queued | DownloadState::Running)
@@ -167,15 +192,15 @@ impl From<String> for SendError {
     }
 }
 
-/// A tool's error for `url`, as a sign-in wall when it reads like one, or when the site hides things from visitors
-/// who aren't signed in and answered "not found".
-fn classify(url: &str, message: String, tried: bool) -> SendError {
-    let lower = message.to_lowercase();
-    let hidden = route::hides_without_sign_in(url) && (lower.contains("not found") || lower.contains("could not be found"));
-    match vault::site_of(url) {
-        Some(site) if hidden || engine::needs_login(&message) => SendError::NeedsLogin { site, tried },
-        _ => SendError::Failed(message),
-    }
+
+/// For a plain stream yt-dlp named after its link (`master`): its title, place and site from the page it was sent
+/// from. `None` when yt-dlp knew the site, or the page doesn't say.
+fn named(from: &SentFrom, info_json: &str, audio: bool) -> Option<(String, PathBuf, Option<String>)> {
+    let info = probe::Info::parse(info_json).ok().filter(probe::Info::generic)?;
+    let site = crate::vault::site_of(&from.page_url);
+    let title = from.title.clone().filter(|title| !title.trim().is_empty()).or_else(|| site.clone())?;
+    let fields = Fields { title: Some(title.clone()), id: None, site: site.clone(), ..info.fields() };
+    Some((title, template::render(&engine::place_template(audio), &fields), site))
 }
 
 // ── Public API ────────────────────────────
@@ -198,18 +223,18 @@ impl Downloads {
     /// No downloads yet; tools come from `toolbox`, remembered sign-ins from `vault`.
     pub fn new(toolbox: Toolbox, vault: Vault) -> Self {
         Self {
+            probes: Probes::new(toolbox.clone(), vault),
             toolbox,
-            vault,
             queue: Queue::new(DownloadLimits::default().at_once as usize),
             entries: Arc::default(),
             list: DownloadList::default(),
-            probed: Arc::default(),
-            previews: Arc::default(),
-            pictures: Arc::default(),
-            fetching: Arc::new(tokio::sync::Semaphore::new(PREVIEWS_AT_ONCE)),
-            sizes: Arc::default(),
             taken: Arc::default(),
         }
+    }
+
+    /// What's known about links: their probes, the link check, thumbnails and sizes.
+    pub fn probes(&self) -> &Probes {
+        &self.probes
     }
 
     /// Keeps the list in `dir` from now on, starting with what's kept there.
@@ -238,42 +263,10 @@ impl Downloads {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner).iter().map(|entry| entry.id).max().unwrap_or(0)
     }
 
-    /// Reads a link's details for the window, and keeps them for its download. Uses the site's remembered sign-in.
-    pub async fn probe(&self, url: &str) -> Result<Probe, String> {
-        let url = engine::check_url(url)?;
-        let cookies = self.remembered(&url);
-        Ok(self.look_up(&url, &[], cookies.as_deref()).await.map_err(|e| e.message())?.probe)
-    }
 
-    /// The size a probed video will download with `preset` at `max_height`; `None` for a link that isn't one
-    /// probed video, or when the site doesn't say.
-    pub async fn size(&self, url: &str, preset: &str, max_height: Option<u32>) -> Result<Option<u64>, String> {
-        let url = engine::check_url(url)?;
-        let preset = presets::find(preset).ok_or("Unknown preset.")?;
-        let key = (url.clone(), preset.id, max_height.filter(|_| !preset.audio));
-        if let Some(size) = self.sizes.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
-            return Ok(*size);
-        }
-        let kept = self.probed.lock().unwrap_or_else(PoisonError::into_inner).get(&url).cloned();
-        let Some(Probed { json, probe, .. }) = kept else { return Ok(None) };
-        if probe.files || probe.count.is_some() || json.is_empty() {
-            return Ok(None);
-        }
-        let size = download::estimate(&self.toolbox, preset, key.2, &json).await?;
-        self.sizes.lock().unwrap_or_else(PoisonError::into_inner).insert(key, size);
-        Ok(size)
-    }
-
-    /// The thumbnail of a video a probe listed, as a `data:` URL; `None` for a link no probe listed, or no picture.
-    pub async fn preview(&self, url: &str) -> Option<String> {
-        if let Some(picture) = self.pictures.lock().unwrap_or_else(PoisonError::into_inner).get(url) {
-            return picture.clone();
-        }
-        let link = self.previews.lock().unwrap_or_else(PoisonError::into_inner).get(url).cloned()?;
-        let _turn = self.fetching.acquire().await.ok()?;
-        let picture = probe::thumbnail(Some(&link)).await;
-        self.pictures.lock().unwrap_or_else(PoisonError::into_inner).insert(url.to_string(), picture.clone());
-        picture
+    /// Whether a download is queued or running (a library move waits for none).
+    pub fn busy(&self) -> bool {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).iter().any(|entry| !finished(entry))
     }
 
     /// The downloads, oldest first.
@@ -293,11 +286,13 @@ impl Downloads {
         Ok(entries.clone())
     }
 
-    /// Removes every finished download from the list (their files stay) and returns what's left.
-    pub fn clear(&self) -> Vec<DownloadEntry> {
+    /// Removes every finished download from the list, or those from `source`, and returns what's left. Their files
+    /// stay.
+    pub fn clear(&self, source: Option<DownloadSource>) -> Vec<DownloadEntry> {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        let ids: Vec<JobId> = entries.iter().filter(|entry| finished(entry)).map(|entry| entry.id).collect();
-        entries.retain(|entry| !finished(entry));
+        let clears = |entry: &DownloadEntry| finished(entry) && source.is_none_or(|source| entry.source == source);
+        let ids: Vec<JobId> = entries.iter().filter(|entry| clears(entry)).map(|entry| entry.id).collect();
+        entries.retain(|entry| !clears(entry));
         self.list.remove(&ids);
         entries.clone()
     }
@@ -316,24 +311,36 @@ impl Downloads {
         let links = if request.sections.is_empty() { vec![request.url] } else { request.sections };
         let mut started = Vec::new();
         for link in links {
-            let entry = self.queue_link(jobs, root.clone(), &link, choice, &request.skip, (Vec::new(), None)).await;
+            let given = (Vec::new(), None, DownloadSource::Download, None);
+            let entry = self.queue_link(jobs, root.clone(), &link, choice, &request.skip, given).await;
             started.push(entry.map_err(|e| e.message())?);
         }
         Ok(started)
     }
 
-    /// Queues a link the extension sent, with the default preset, the page's allowed headers and a sign-in given
-    /// for it, if any (`bridge` checked them all). A playlist or profile saves its first 50 files.
+    /// Queues a link the extension sent, with the start preset and quality from Settings (an audio preset for a link
+    /// with no video, ADR-0035), the page's allowed headers and a sign-in given for it, if any (`bridge` checked them
+    /// all). A playlist or profile saves its first 50 files. A plain stream takes `from`'s title and site.
     pub async fn send_video(
         &self,
         jobs: &Arc<Jobs>,
         root: PathBuf,
         url: &str,
+        from: Option<SentFrom>,
         headers: Vec<(String, String)>,
         cookies: Option<Vec<Cookie>>,
     ) -> Result<DownloadEntry, SendError> {
-        let choice = (&presets::PRESETS[0], None, Some(EXTENSION_LIMIT));
-        self.queue_link(jobs, root, url, choice, &[], (headers, cookies)).await
+        let checked = engine::check_url(url)?;
+        let known = cookies.clone().or_else(|| self.probes.remembered(&checked));
+        // Read first to know whether it has video; `queue_link` gets the same answer from the probe cache.
+        let probed = self.probes.look_up(&checked, &headers, known.as_deref()).await?;
+        let media = engine::options();
+        // A list is video; a single link is audio only when every format it offers says so.
+        let has_video = probed.probe.count.is_some() || !probe::Info::parse(&probed.json).is_ok_and(|info| info.audio_only());
+        let preset = presets::for_send(media.preset.as_deref(), has_video);
+        let choice = (preset, media.max_height, Some(EXTENSION_LIMIT));
+        let given = (headers, cookies, DownloadSource::Extension, from.as_ref());
+        self.queue_link(jobs, root, url, choice, &[], given).await
     }
 
     /// Queues an image the extension sent; it's saved under `Images/{site}/`, the site taken from `page_url`.
@@ -360,7 +367,7 @@ impl Downloads {
             quiet: false,
         };
         let title = title.unwrap_or_else(|| url.clone());
-        Ok(self.queue_file(jobs, url, title, IMAGE_PRESET, order))
+        Ok(self.queue_file(jobs, row(DownloadSource::Extension, url, title, IMAGE_PRESET, None), order))
     }
 
     /// Saves one file now, inside `job` (a crawl, which reports its own progress), with the page as Referer.
@@ -397,22 +404,24 @@ impl Downloads {
             let page_url = Some(page);
             let (kind, min_bytes, quiet) = (request.kind, 0, false);
             let order = FileOrder { root, url: url.clone(), page_url, headers, taken, kind, folder, min_bytes, quiet };
-            return Ok(self.queue_file(jobs, url, request.title, FILE_PRESET, order));
+            return Ok(self.queue_file(jobs, row(DownloadSource::Grab, url, request.title, FILE_PRESET, None), order));
         }
-        let info_json = probe::fetch(&self.toolbox, &url, &headers, None).await?;
+        let info_json = probe::fetch(&self.toolbox, &url, &headers, None, false).await?;
         let preset = &presets::PRESETS[0];
         let name = template::render("{title}", &Fields { title: Some(request.title.clone()), ..Fields::default() });
         let (place, site) = (Some(request.folder.join(name)), request.site);
         let order = Order { root, url: url.clone(), preset, max_height: None, info_json, headers, cookies: None, taken, place, site };
         let toolbox = self.toolbox.clone();
-        Ok(self.queue(jobs, (url, request.title), preset.name, None, true, move |job| async move {
-            download::run(&toolbox, order, &job).await
-        }))
+        let row = row(DownloadSource::Grab, url, request.title, preset.name, None);
+        let folder = download::folder(&order);
+        let entry = self.queue(jobs, row, true, move |job| async move { download::run(&toolbox, order, &job).await });
+        Ok(self.going_to(entry, folder))
     }
 
     /// Queues a link as the job its probe calls for: one video, a playlist or channel (yt-dlp), or a post or
     /// profile (gallery-dl). The preset, highest height and file limit come in `choice`, a playlist's videos to
-    /// leave out in `skip`; the page's headers come with the sign-in `given`, else the site's remembered one is used.
+    /// leave out in `skip`; the page's headers come with the sign-in `given` (else the site's remembered one is used),
+    /// the row's source, and the page a plain stream is named after.
     async fn queue_link(
         &self,
         jobs: &Arc<Jobs>,
@@ -420,11 +429,11 @@ impl Downloads {
         url: &str,
         (preset, max_height, limit): (&'static Preset, Option<u32>, Option<u32>),
         skip: &[String],
-        (headers, given): (Vec<(String, String)>, Option<Vec<Cookie>>),
+        (headers, given, source, from): Given<'_>,
     ) -> Result<DownloadEntry, SendError> {
         let url = engine::check_url(url)?;
-        let cookies = given.or_else(|| self.remembered(&url));
-        let Probed { json: info_json, probe, .. } = self.look_up(&url, &headers, cookies.as_deref()).await?;
+        let cookies = given.or_else(|| self.probes.remembered(&url));
+        let Probed { json: info_json, probe, whole, .. } = self.probes.look_up(&url, &headers, cookies.as_deref()).await?;
         let toolbox = self.toolbox.clone();
         let tried = cookies.is_some();
         let link = url.clone();
@@ -437,104 +446,71 @@ impl Downloads {
                 (total, limit) => total.or(limit),
             };
             let order = GalleryOrder { root, url: url.clone(), limit, total, cookies };
-            return Ok(self.queue(jobs, (url, title), FILES_PRESET, thumbnail, true, move |job| async move {
+            let row = row(source, url, title, FILES_PRESET, thumbnail);
+            return Ok(self.queue(jobs, row, true, move |job| async move {
                 gallery::run(&toolbox, order, &job).await.map_err(fail)
             }));
         }
         if probe.count.is_some() {
             // Video by video when the listing has them all, or some were left out (then only the listed ones go).
             let left_out = probe.entries.iter().any(|entry| skip.contains(&entry.url));
-            let links = (!probe.entries.is_empty() && (!probe.more || left_out)).then(|| {
+            let links = (!probe.entries.is_empty() && ((whole && !probe.more) || left_out)).then(|| {
                 probe.entries.iter().filter(|entry| !skip.contains(&entry.url)).map(|entry| entry.url.clone()).collect()
             });
             let slots = self.queue.clone();
             let order =
                 PlaylistOrder { root, url: url.clone(), preset, max_height, limit, links, info_json, cookies, slots };
             // Not in a slot itself: its videos take them.
-            return Ok(self.queue(jobs, (url, title), preset.name, thumbnail, false, move |job| async move {
+            let row = row(source, url, title, preset.name, thumbnail);
+            return Ok(self.queue(jobs, row, false, move |job| async move {
                 playlist::run(&toolbox, order, &job).await.map_err(fail)
             }));
         }
         let taken = self.taken.clone();
-        let order =
-            Order { root, url: url.clone(), preset, max_height, info_json, headers, cookies, taken, place: None, site: None };
-        Ok(self.queue(jobs, (url, title), preset.name, thumbnail, true, move |job| async move {
-            download::run(&toolbox, order, &job).await.map_err(fail)
-        }))
-    }
-
-    /// The site's remembered sign-in, if there is one.
-    fn remembered(&self, url: &str) -> Option<Vec<Cookie>> {
-        vault::site_of(url).and_then(|site| self.vault.cookies_for(&site))
-    }
-
-    /// `url`'s probe: kept from the last hour, else asked from the tool its route names, with a temporary cookies
-    /// file while it runs when there's a sign-in.
-    async fn look_up(
-        &self,
-        url: &str,
-        headers: &[(String, String)],
-        cookies: Option<&[Cookie]>,
-    ) -> Result<Probed, SendError> {
-        let kept = self.probed.lock().unwrap_or_else(PoisonError::into_inner).get(url).cloned();
-        if let Some(kept) = kept.filter(|probed| probed.at.elapsed() < PROBE_KEPT) {
-            return Ok(kept);
-        }
-        let tried = cookies.is_some();
-        let file = cookies.map(CookieFile::write).transpose()?;
-        let (json, probe) = match route::route(url) {
-            Engine::GalleryDl => {
-                let listing = gallery::list(&self.toolbox, url, file.as_ref())
-                    .await
-                    .map_err(|message| classify(url, message, tried))?;
-                if listing.count == 0 {
-                    return Err(SendError::Failed("There's nothing to download here.".into()));
-                }
-                let thumbnail = probe::thumbnail(listing.preview.as_deref()).await;
-                (String::new(), listing.probe(url, thumbnail))
-            }
-            Engine::YtDlp => {
-                let json = probe::fetch(&self.toolbox, url, headers, file.as_ref())
-                    .await
-                    .map_err(|message| classify(url, message, tried))?;
-                let info = Info::parse(&json)?;
-                self.previews.lock().unwrap_or_else(PoisonError::into_inner).extend(info.previews());
-                let thumbnail = probe::thumbnail(info.thumbnail_url()).await;
-                // A channel's sections come listed inside its listing: kept, so each downloads without a new probe.
-                for (link, json) in probe::section_listings(&json) {
-                    let probe = Info::parse(&json)?.probe(&link, thumbnail.clone());
-                    let probed = Probed { at: Instant::now(), json, probe };
-                    self.probed.lock().unwrap_or_else(PoisonError::into_inner).insert(link, probed);
-                }
-                let probe = info.probe(url, thumbnail);
-                (json, probe)
-            }
+        let named = from.and_then(|from| named(from, &info_json, preset.audio));
+        let (title, place, site) = match named {
+            Some((name, place, site)) => (name, Some(place), site),
+            None => (title, None, None),
         };
-        let probed = Probed { at: Instant::now(), json, probe };
-        self.probed.lock().unwrap_or_else(PoisonError::into_inner).insert(url.to_string(), probed.clone());
-        Ok(probed)
+        let order = Order { root, url: url.clone(), preset, max_height, info_json, headers, cookies, taken, place, site };
+        let row = row(source, url, title, preset.name, thumbnail);
+        let folder = download::folder(&order);
+        let entry =
+            self.queue(jobs, row, true, move |job| async move { download::run(&toolbox, order, &job).await.map_err(fail) });
+        Ok(self.going_to(entry, folder))
     }
+
+
+    /// Adds a row for a job another module runs (a scrape or a hunt) and starts it, outside the download slots.
+    /// `work` returns how many files it saved into `folder` (relative to the library root). Must be called inside a
+    /// Tokio runtime.
+    pub fn track<F, Fut>(&self, jobs: &Arc<Jobs>, row: Row, folder: String, work: F) -> JobId
+    where
+        F: FnOnce(Job) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<u64, String>> + Send + 'static,
+    {
+        let entry = self.queue(jobs, row, false, move |job| async move {
+            let files = u32::try_from(work(job).await?).unwrap_or(u32::MAX);
+            let (path, files) = (Some(folder), Some(files));
+            Ok(Saved { path, files, skipped: None, bytes: None, types: Vec::new(), warning: None })
+        });
+        entry.id
+    }
+
 
     /// Queues a file fetched as it is.
-    fn queue_file(&self, jobs: &Arc<Jobs>, url: String, title: String, preset: &str, order: FileOrder) -> DownloadEntry {
-        self.queue(jobs, (url, title), preset, None, true, move |job| async move {
+    fn queue_file(&self, jobs: &Arc<Jobs>, row: Row, order: FileOrder) -> DownloadEntry {
+        self.queue(jobs, row, true, move |job| async move {
             let root = order.root.clone();
             let path = file::run(order, &job).await?;
-            let bytes = size_of(&root.join(&path));
-            Ok(Saved { path: Some(path), files: None, skipped: None, bytes })
+            let file = root.join(&path);
+            let (bytes, types) = (size_of(&file), types_of(&[file]));
+            Ok(Saved { path: Some(path), files: None, skipped: None, bytes, types, warning: None })
         })
     }
 
     /// Adds an entry and starts its job, in a download slot when `slotted`; the job's result becomes the entry's state.
-    fn queue<F, Fut>(
-        &self,
-        jobs: &Arc<Jobs>,
-        (url, title): (String, String),
-        preset: &str,
-        thumbnail: Option<String>,
-        slotted: bool,
-        work: F,
-    ) -> DownloadEntry
+    fn queue<F, Fut>(&self, jobs: &Arc<Jobs>, row: Row, slotted: bool, work: F) -> DownloadEntry
     where
         F: FnOnce(Job) -> Fut + Send + 'static,
         Fut: Future<Output = Result<Saved, String>> + Send + 'static,
@@ -553,6 +529,8 @@ impl Downloads {
                     entry.state = DownloadState::Done;
                     (entry.file, entry.files, entry.skipped) = (saved.path.clone(), saved.files, saved.skipped);
                     entry.size = saved.bytes;
+                    entry.types.clone_from(&saved.types);
+                    entry.error.clone_from(&saved.warning);
                 }
                 Err(message) => (entry.state, entry.error) = (DownloadState::Failed, Some(message.clone())),
             });
@@ -561,19 +539,33 @@ impl Downloads {
         let id = if slotted { jobs.start_in(&self.queue, run) } else { jobs.start(run) };
         let entry = DownloadEntry {
             id,
-            url,
-            title,
-            preset: preset.to_string(),
+            source: row.source,
+            url: row.url,
+            title: row.title,
+            preset: row.kind,
             state: DownloadState::Queued,
-            thumbnail,
+            thumbnail: row.thumbnail,
             file: None,
             files: None,
             skipped: None,
             size: None,
             error: None,
+            types: Vec::new(),
         };
         self.list.put(&entry);
         entries.push(entry.clone());
+        entry
+    }
+
+    /// Notes the folder `entry` saves into, so a failed download can show it; the saved file replaces it when it's
+    /// done.
+    fn going_to(&self, mut entry: DownloadEntry, folder: Option<String>) -> DownloadEntry {
+        if let Some(folder) = folder {
+            self.update(entry.id, |row| {
+                row.file.get_or_insert_with(|| folder.clone());
+            });
+            entry.file.get_or_insert(folder);
+        }
         entry
     }
 
@@ -588,12 +580,25 @@ impl Downloads {
 
 #[cfg(test)]
 mod tests {
-    use super::{DownloadRequest, DownloadState, Downloads, SendError, classify};
+    use super::{DownloadRequest, DownloadSource, DownloadState, Downloads, Row, SentFrom, named};
     use crate::jobs::{JobEvent, Jobs};
     use crate::tools::Toolbox;
     use crate::vault::{KeySource, Vault};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    #[test]
+    fn names_a_plain_stream_after_its_page() {
+        let page_url = "https://www.pornhub.com/view_video.php?viewkey=a".to_string();
+        let from = SentFrom { page_url, title: Some("Clip".into()) };
+        let stream = r#"{"id":"master","title":"master","extractor_key":"Generic","webpage_url":"https://cdn.example/master.m3u8"}"#;
+        let (title, place, site) = named(&from, stream, false).unwrap();
+        assert_eq!((title.as_str(), site.as_deref()), ("Clip", Some("pornhub.com")));
+        assert!(place.starts_with("Videos/pornhub.com") && place.ends_with("Clip"), "{place:?}");
+        // A site yt-dlp reads keeps yt-dlp's own names.
+        let known = r#"{"id":"a","title":"Real title","extractor_key":"PornHub","webpage_url":"https://www.pornhub.com/view_video.php?viewkey=a"}"#;
+        assert!(named(&from, known, false).is_none());
+    }
 
     async fn wait_for(finished: &Mutex<usize>, count: usize) {
         while *finished.lock().unwrap() < count {
@@ -619,12 +624,29 @@ mod tests {
         (jobs, finished, toolbox, installs)
     }
 
-    #[test]
-    fn reads_not_found_as_a_sign_in_where_sites_hide_things() {
-        let missing = || "Requested user could not be found".to_string();
-        let instagram = classify("https://www.instagram.com/nasa/", missing(), false);
-        assert_eq!(instagram, SendError::NeedsLogin { site: "instagram.com".into(), tried: false });
-        assert_eq!(classify("https://bsky.app/profile/a", missing(), false), SendError::Failed(missing()));
+    #[tokio::test]
+    async fn tracks_other_jobs_and_clears_by_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let finished = Arc::new(Mutex::new(0));
+        let sink = finished.clone();
+        let jobs = Jobs::new(Arc::new(move |event| {
+            if let JobEvent::Finished(_) = event {
+                *sink.lock().unwrap() += 1;
+            }
+        }));
+        let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
+        let downloads = Downloads::new(Toolbox::new(dir.path().join("tools")), vault);
+        for (source, kind) in [(DownloadSource::Scrape, "Mirror"), (DownloadSource::Hunt, "Images")] {
+            let row = Row { source, url: String::new(), title: "cats".into(), kind: kind.into(), thumbnail: None };
+            downloads.track(&jobs, row, "Sites/example.com".into(), |_| async { Ok(3) });
+        }
+        wait_for(&finished, 2).await;
+        let done: Vec<_> = downloads.list().into_iter().map(|e| (e.source, e.state, e.files, e.file)).collect();
+        let folder = Some("Sites/example.com".to_string());
+        assert_eq!(done[0], (DownloadSource::Scrape, DownloadState::Done, Some(3), folder));
+        let left = downloads.clear(Some(DownloadSource::Scrape));
+        assert_eq!(left.iter().map(|e| e.source).collect::<Vec<_>>(), [DownloadSource::Hunt]);
+        assert!(downloads.clear(None).is_empty());
     }
 
     /// Proves the whole pipeline on a 19-second public video: run with `cargo test -p scrappy-core -- --ignored`.
@@ -639,7 +661,7 @@ mod tests {
         let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
         let downloads = Downloads::new(toolbox, vault);
         let url = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
-        let probe = downloads.probe(url).await.unwrap();
+        let probe = downloads.probes.look_up(url, &[], None).await.unwrap().probe;
         assert_eq!(probe.title, "Me at the zoo");
         assert!(probe.thumbnail.as_deref().is_some_and(|t| t.starts_with("data:image/")));
         for preset in ["editor-mp4", "hevc-mp4", "mp3"] {
@@ -659,45 +681,6 @@ mod tests {
         assert_eq!(rows, 3);
     }
 
-    /// Proves a channel's sections are counted one by one, list their videos, and are kept for their downloads.
-    /// Needs `SCRAPPY_TOOLS` (a folder with yt-dlp); run with `cargo test -p scrappy-core -- --ignored counts_a_channels`.
-    #[tokio::test]
-    #[ignore = "asks YouTube for a channel's listing"]
-    async fn counts_a_channels_videos_and_shorts() {
-        let dir = tempfile::tempdir().unwrap();
-        let tools = std::env::var("SCRAPPY_TOOLS").expect("SCRAPPY_TOOLS");
-        let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
-        let downloads = Downloads::new(Toolbox::new(tools.into()), vault);
-        let probe = downloads.probe("https://www.youtube.com/@GDULA7").await.unwrap();
-        let counts: Vec<_> = probe.sections.iter().map(|s| (s.title.as_str(), s.count, s.entries.len())).collect();
-        println!("{} {:?} {counts:?}", probe.title, probe.count);
-        assert!(probe.sections.len() >= 2, "{probe:?}");
-        assert_eq!(probe.count, Some(probe.sections.iter().map(|s| s.count).sum()));
-        assert!(probe.sections.iter().all(|s| s.entries.len() == s.count as usize), "{counts:?}");
-        let videos = &probe.sections[0];
-        assert_eq!(videos.title, "Videos");
-        let kept = downloads.probe(&videos.url).await.unwrap();
-        assert_eq!((kept.count, kept.entries.len()), (Some(videos.count), videos.entries.len()));
-        let short = &probe.sections[1].entries[0];
-        assert!(short.tall && !videos.entries[0].tall, "{short:?}");
-        let picture = downloads.preview(&short.url).await.unwrap();
-        assert!(picture.starts_with("data:image/"));
-        assert_eq!(downloads.preview("https://example.com/not-listed").await, None);
-    }
-
-    /// Proves a video link that names a playlist probes as the playlist. Needs `SCRAPPY_TOOLS`, like the test above.
-    #[tokio::test]
-    #[ignore = "asks YouTube for a playlist's listing"]
-    async fn reads_a_video_in_a_playlist_as_the_playlist() {
-        let dir = tempfile::tempdir().unwrap();
-        let tools = std::env::var("SCRAPPY_TOOLS").expect("SCRAPPY_TOOLS");
-        let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
-        let downloads = Downloads::new(Toolbox::new(tools.into()), vault);
-        let url = "https://www.youtube.com/watch?v=cvaIgq5j2Q8&list=PL0wqt_um4x0bsdViTJBmnl6KGMoSqxfZy";
-        let probe = downloads.probe(url).await.unwrap();
-        println!("{} {:?} {}", probe.title, probe.count, probe.entries.len());
-        assert!(probe.count.is_some_and(|count| count > 100) && !probe.entries.is_empty(), "{probe:?}");
-    }
 
     /// Proves collections: two videos of a playlist, then two files of a Bluesky profile, each twice so the second
     /// run skips them. Run with `cargo test -p scrappy-core -- --ignored`.
@@ -717,7 +700,7 @@ mod tests {
         ];
         let mut done = installs;
         for (url, preset) in links {
-            let probe = downloads.probe(url).await.unwrap();
+            let probe = downloads.probes.look_up(url, &[], None).await.unwrap().probe;
             assert!(probe.count.is_some_and(|count| count >= 2), "{probe:?}");
             for _ in 0..2 {
                 let request = DownloadRequest { url: url.into(), preset: preset.into(), max_height: None, limit: Some(2), sections: Vec::new(), skip: Vec::new() };

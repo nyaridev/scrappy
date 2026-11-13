@@ -1,4 +1,5 @@
-/* Popup layout: a fixed-width column, the switch on top, the rows under it. Only iro-ui tokens, never raw values. */
+/* Popup layout: a fixed-width column: the name and Grab all, the page's card, the sign-in line, the switch and filter,
+   the rows. Only iro-ui tokens, never raw values. */
 
 body {
   margin: 0;
@@ -20,15 +21,30 @@ body {
   background: var(--iro-bg);
 }
 
-/* "Grab all" on top, its error under it. */
-.popup-grab {
-  display: grid;
-  gap: var(--iro-space-1);
+/* The logo and name at the left, Grab all at the right. */
+.popup-head {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
 }
 
-.popup-grab-error {
+.popup-logo {
+  width: var(--iro-space-5);
+  height: var(--iro-space-5);
+}
+
+.popup-name {
+  flex: 1;
+  font-family: var(--iro-font-display);
+  font-size: var(--iro-text-base);
+  font-weight: 700;
+}
+
+.popup-error {
   color: var(--iro-danger);
   font-size: var(--iro-text-xs);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .popup-spinner {
@@ -128,4 +144,67 @@ body {
   place-items: center;
   width: calc(var(--iro-space-6) * 1.5);
   color: var(--iro-success);
+}
+
+/* The page itself: a card above the list, what's sent most. */
+.rows-page .row {
+  padding: var(--iro-space-3);
+  border: 1px solid var(--iro-line);
+  background: var(--iro-surface);
+}
+
+.rows-page .row-name {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* A page no site reader knows: one small line, sending it is the exception. */
+.rows-page .row[data-compact] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: var(--iro-space-2) var(--iro-space-3);
+  border-style: dashed;
+  background: transparent;
+}
+
+.rows-page .row[data-compact] .row-name {
+  -webkit-line-clamp: 1;
+  font-weight: 500;
+}
+
+/* The site's sign-in: a key, the site over its state, and the share button. */
+.popup-signin {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+  padding: 0 var(--iro-space-2);
+  color: var(--iro-fg-3);
+}
+
+.popup-signin-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.popup-signin-site {
+  overflow: hidden;
+  color: var(--iro-fg);
+  font-size: var(--iro-text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-signin-state {
+  font-size: var(--iro-text-xs);
+}
+
+/* The Videos / Images switch, with the size filter beside it. */
+.popup-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--iro-space-2);
+  align-items: center;
 }

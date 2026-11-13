@@ -1,6 +1,7 @@
 //! Rewrite: points a saved page's and stylesheet's links at the mirror's copies by relative path (`href`, `src`,
-//! `srcset`, `poster`, lazy `data-src`, CSS `url()` and `@import`, in attributes, `<style>` and CSS files). A link to
-//! anything the mirror didn't save stays as it was (ADR-0008).
+//! `srcset`, `poster`, lazy `data-src`, CSS `url()` and `@import`, in attributes, `<style>` and CSS files) (ADR-0008).
+//! Read from the page's own address, a link to anything the mirror didn't save points at the live site; read again
+//! after media was saved (no address), only those live links change (ADR-0033).
 
 // ── Imports ───────────────────────────────
 use std::cell::RefCell;
@@ -22,16 +23,28 @@ const SETS: &[&str] = &["srcset", "data-srcset"];
 pub type Saved = HashMap<String, PathBuf>;
 
 // ── Private helpers ───────────────────────
-/// The relative link to `link`'s saved copy, from the file at `from`, keeping its `#fragment`.
-fn target(saved: &Saved, base: &Url, from: &Path, link: &str) -> Option<String> {
+/// What `link` becomes in the file saved at `from`, keeping its `#fragment`: the relative link to its saved copy, or
+/// with a `base`, the live address of anything not saved. `None` leaves it as it is. Without a `base` only absolute
+/// links are read: the page was rewritten before, and its relative links are copies already.
+fn target(saved: &Saved, base: Option<&Url>, from: &Path, link: &str) -> Option<String> {
     let link = link.trim();
     if link.is_empty() || link.starts_with('#') {
         return None;
     }
-    let mut url = base.join(link).ok()?;
+    let mut url = match base {
+        Some(base) => base.join(link).ok()?,
+        None => Url::parse(link).ok()?,
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
     let fragment = url.fragment().map(|fragment| format!("#{fragment}")).unwrap_or_default();
     url.set_fragment(None);
-    saved.get(url.as_str()).map(|local| relative_link(from, local) + &fragment)
+    let swapped = match saved.get(url.as_str()) {
+        Some(local) => relative_link(from, local) + &fragment,
+        None => base.map(|_| format!("{url}{fragment}"))?,
+    };
+    (swapped != link).then_some(swapped)
 }
 
 fn srcset(value: &str, swap: impl Fn(&str) -> Option<String>) -> String {
@@ -94,7 +107,7 @@ fn swap_imports(css: &str, swap: &impl Fn(&str) -> Option<String>) -> String {
 
 /// The page's `<style>` elements rewritten. lol_html hands their text over in pieces: each is held back until the
 /// last one, which is replaced by the whole style rewritten.
-fn rewrite_styles(html: &str, base: &Url, from: &Path, saved: &Saved) -> String {
+fn rewrite_styles(html: &str, base: Option<&Url>, from: &Path, saved: &Saved) -> String {
     let buffer = RefCell::new(String::new());
     let mut out = Vec::with_capacity(html.len());
     let mut rewriter = HtmlRewriter::new(
@@ -120,16 +133,18 @@ fn rewrite_styles(html: &str, base: &Url, from: &Path, saved: &Saved) -> String 
 }
 
 // ── Public API ────────────────────────────
-/// A stylesheet (or a `style`) at `base`, saved at `from`, with its links pointing at the saved copies.
-pub fn rewrite_css(css: &str, base: &Url, from: &Path, saved: &Saved) -> String {
+/// A stylesheet (or a `style`) from `base` (`None`: rewritten before), saved at `from`, with its links pointing at the
+/// saved copies.
+pub fn rewrite_css(css: &str, base: Option<&Url>, from: &Path, saved: &Saved) -> String {
     let swap = |link: &str| target(saved, base, from, link);
     swap_imports(&swap_urls(css, &swap), &swap)
 }
 
-/// A page from `base`, saved at `from`, with its links pointing at the saved copies. A `<base>` element is dropped,
+/// A page from `base` (`None`: rewritten before), saved at `from`, with its links pointing at the saved copies. A
+/// `<base>` element is dropped,
 /// and so is the integrity check of anything rewritten (the copy may differ). The page is saved as UTF-8, so its
 /// declared charset says so.
-pub fn rewrite_html(html: &str, base: &Url, from: &Path, saved: &Saved) -> String {
+pub fn rewrite_html(html: &str, base: Option<&Url>, from: &Path, saved: &Saved) -> String {
     let swap = |link: &str| target(saved, base, from, link);
     let mut out = Vec::with_capacity(html.len());
     let mut rewriter = HtmlRewriter::new(
@@ -212,25 +227,38 @@ mod tests {
             <a href="/#top">home</a><a href="#here">here</a><a href="https://elsewhere.org/">out</a><a href="/missing">gone</a>
             <img src="/img/a.png" srcset="/img/a.png 1x, /img/a@2x.png 2x, /img/c.png 3x">
             <div style="background:url(/img/bg.png)"></div></body></html>"##;
-        let page = rewrite_html(html, &base, Path::new("about/index.html"), &saved());
+        let page = rewrite_html(html, Some(&base), Path::new("about/index.html"), &saved());
         assert!(!page.contains("<base") && page.contains(r#"<meta charset="utf-8">"#), "{page}");
         assert!(page.contains(r#"<link rel="stylesheet" href="../css/site.css">"#), "{page}");
         assert!(page.contains("<style>body { background: url('../img/bg.png') }</style>"), "{page}");
         assert!(page.contains(r##"<a href="../index.html#top">"##) && page.contains(r##"<a href="#here">"##));
-        assert!(page.contains(r#"href="https://elsewhere.org/""#) && page.contains(r#"href="/missing""#));
-        assert!(page.contains(r#"<img src="../img/a.png" srcset="../img/a.png 1x, ../img/a@2x.png 2x, /img/c.png 3x">"#));
+        assert!(page.contains(r#"href="https://elsewhere.org/""#), "{page}");
+        assert!(page.contains(r#"href="https://example.com/missing""#), "{page}");
+        let srcset = r#"srcset="../img/a.png 1x, ../img/a@2x.png 2x, https://example.com/img/c.png 3x""#;
+        assert!(page.contains(&format!(r#"<img src="../img/a.png" {srcset}>"#)), "{page}");
         assert!(page.contains(r#"<div style="background:url(../img/bg.png)">"#), "{page}");
     }
 
     #[test]
     fn points_a_stylesheets_links_at_the_copies() {
         let base = Url::parse("https://example.com/css/site.css").unwrap();
-        let css = r#"@import 'base.css'; @import "print.css"; @import url(base.css); .a { background: url(../img/bg.png) }
+        let css = r#"@import 'base.css'; @import "print.css"; @import url(base.css); .a {
+            background: url(../img/bg.png) }
             @font-face { src: url("https://cdn.net/f.woff2"), url(data:font/woff2;base64,AA) }"#;
         assert_eq!(
-            rewrite_css(css, &base, Path::new("css/site.css"), &saved()),
-            r#"@import 'base.css'; @import "print.css"; @import url(base.css); .a { background: url(../img/bg.png) }
+            rewrite_css(css, Some(&base), Path::new("css/site.css"), &saved()),
+            r#"@import 'base.css'; @import "https://example.com/css/print.css"; @import url(base.css); .a {
+            background: url(../img/bg.png) }
             @font-face { src: url("../_hosts/cdn.net/f.woff2"), url(data:font/woff2;base64,AA) }"#
         );
+    }
+
+    #[test]
+    fn points_live_links_at_media_saved_later() {
+        let page = r##"<link href="../css/site.css" rel="stylesheet"><img src="https://example.com/img/a.png">
+            <img src="https://example.com/img/c.png"><a href="#top">top</a>"##;
+        let again = rewrite_html(page, None, Path::new("about/index.html"), &saved());
+        assert!(again.contains(r#"<link href="../css/site.css" rel="stylesheet"><img src="../img/a.png">"#), "{again}");
+        assert!(again.contains(r##"<img src="https://example.com/img/c.png"><a href="#top">"##), "{again}");
     }
 }

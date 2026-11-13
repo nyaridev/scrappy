@@ -7,4 +7,4 @@ mod scan;
 
 pub use fingerprint::{fingerprint, jpeg_quality};
 pub use group::{Picture, Strictness, groups};
-pub use scan::{DuplicateRequest, Duplicates, trash};
+pub use scan::{DuplicateRequest, Duplicates, remove_copies, set_auto_strictness, trash};

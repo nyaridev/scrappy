@@ -1,0 +1,5 @@
+# Memes and GIFs: meme databases, generators and GIF sites.
+name = "Memes and GIFs"
+group = "Entertainment"
+web = false
+sites = ["knowyourmeme.com", "imgflip.com", "tenor.com", "giphy.com", "reddit.com"]

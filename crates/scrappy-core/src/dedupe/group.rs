@@ -14,10 +14,12 @@ use ts_rs::TS;
 const SHAPE_TOLERANCE: f64 = 0.03;
 /// Formats from best to worst for keeping: lossless first.
 const FORMATS: &[&[&str]] = &[&["png", "tif", "tiff", "bmp"], &["webp"], &["jpg", "jpeg"], &["gif"]];
+/// A hash is filed by each of its four 16-bit quarters to find close ones.
+const QUARTERS: u32 = 4;
 
 // ── Types ─────────────────────────────────
 /// How alike two pictures must be to count as copies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Strictness {
@@ -81,20 +83,40 @@ fn root(parents: &mut [usize], mut at: usize) -> usize {
     at
 }
 
-// ── Public API ────────────────────────────
-/// The groups of two or more copies among `copies`, each best first, the biggest groups first.
-pub fn groups(copies: Vec<Picture>, strictness: Strictness) -> Vec<Vec<Picture>> {
-    let limit = strictness.max_distance();
-    let mut parents: Vec<usize> = (0..copies.len()).collect();
-    // shortcut: compares every pair (fine for tens of thousands of pictures); use a BK-tree past that.
-    for i in 0..copies.len() {
-        for j in i + 1..copies.len() {
-            if (copies[i].hash ^ copies[j].hash).count_ones() <= limit && same_shape(&copies[i], &copies[j]) {
-                let (a, b) = (root(&mut parents, i), root(&mut parents, j));
-                parents[a] = b;
+/// Calls `pair(i, j)`, `i < j`, at least once for every two hashes at most `limit` bits apart. Two hashes that close
+/// have a quarter at most `limit / 4` bits apart, so each hash looks only at those filed under a quarter that near its
+/// own instead of at every other one (multi-index hashing): the work grows with the pictures, not with their pairs.
+fn each_close_pair(hashes: &[u64], limit: u32, mut pair: impl FnMut(usize, usize)) {
+    let quarter = |hash: u64, part: u32| (hash >> (16 * part)) as u16;
+    let flips: Vec<u16> = (0..=u16::MAX).filter(|flip| flip.count_ones() <= limit / QUARTERS).collect();
+    for part in 0..QUARTERS {
+        let mut filed: Vec<Vec<usize>> = vec![Vec::new(); 1 << 16];
+        for (index, &hash) in hashes.iter().enumerate() {
+            filed[usize::from(quarter(hash, part))].push(index);
+        }
+        for (i, &hash) in hashes.iter().enumerate() {
+            for flip in &flips {
+                for &j in &filed[usize::from(quarter(hash, part) ^ flip)] {
+                    if j > i && (hash ^ hashes[j]).count_ones() <= limit {
+                        pair(i, j);
+                    }
+                }
             }
         }
     }
+}
+
+// ── Public API ────────────────────────────
+/// The groups of two or more copies among `copies`, each best first, the biggest groups first.
+pub fn groups(copies: Vec<Picture>, strictness: Strictness) -> Vec<Vec<Picture>> {
+    let mut parents: Vec<usize> = (0..copies.len()).collect();
+    let hashes: Vec<u64> = copies.iter().map(|copy| copy.hash).collect();
+    each_close_pair(&hashes, strictness.max_distance(), |i, j| {
+        let (a, b) = (root(&mut parents, i), root(&mut parents, j));
+        if a != b && same_shape(&copies[i], &copies[j]) {
+            parents[a] = b;
+        }
+    });
     let mut by_root: HashMap<usize, Vec<Picture>> = HashMap::new();
     for (index, copy) in copies.into_iter().enumerate() {
         by_root.entry(root(&mut parents, index)).or_default().push(copy);
@@ -137,6 +159,59 @@ mod tests {
             Strictness::Strict,
         );
         assert_eq!(paths(&found), [["c.jpg", "a.jpg", "b.png"]]);
+    }
+
+    #[test]
+    fn groups_as_comparing_every_pair_would() {
+        // Clusters of hashes a few to a dozen bits from a random center, from a fixed xorshift.
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut hashes = Vec::new();
+        for _ in 0..200 {
+            let center = next();
+            for _ in 0..10 {
+                let flips = (0..next() % 13).fold(0u64, |mask, _| mask | 1 << (next() % 64));
+                hashes.push(center ^ flips);
+            }
+        }
+        for strictness in [Strictness::Strict, Strictness::Normal, Strictness::Loose] {
+            let limit = strictness.max_distance();
+            let mut parents: Vec<usize> = (0..hashes.len()).collect();
+            for i in 0..hashes.len() {
+                for j in i + 1..hashes.len() {
+                    if (hashes[i] ^ hashes[j]).count_ones() <= limit {
+                        let (a, b) = (super::root(&mut parents, i), super::root(&mut parents, j));
+                        parents[a] = b;
+                    }
+                }
+            }
+            let copies = hashes.iter().enumerate().map(|(i, &hash)| copy(&format!("{i:04}.png"), hash, (4, 3), 1, None));
+            let mut expected: Vec<Vec<String>> = (0..hashes.len())
+                .fold(std::collections::BTreeMap::<usize, Vec<String>>::new(), |mut by_root, i| {
+                    by_root.entry(super::root(&mut parents, i)).or_default().push(format!("{i:04}.png"));
+                    by_root
+                })
+                .into_values()
+                .filter(|group| group.len() > 1)
+                .collect();
+            let mut found: Vec<Vec<String>> = groups(copies.collect(), strictness)
+                .into_iter()
+                .map(|group| {
+                    let mut paths: Vec<String> = group.into_iter().map(|copy| copy.path).collect();
+                    paths.sort();
+                    paths
+                })
+                .collect();
+            expected.sort();
+            found.sort();
+            assert!(!found.is_empty());
+            assert_eq!(found, expected, "{strictness:?}");
+        }
     }
 
     #[test]

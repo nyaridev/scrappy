@@ -1,6 +1,6 @@
-//! Gallery: the library folder's files one page at a time for the Gallery view, filtered by kind, site and a search,
-//! sorted by date, size or name, and a picture whole for the lightbox. The folder says what's there; the catalog adds
-//! what it knows of each file (ADR-0015).
+//! Gallery: the library folder's files one page at a time for the Gallery view, filtered by kind, folder and a
+//! search, sorted by date, size or name, with the folders for its sidebar, and a picture whole for the lightbox. The
+//! folder says what's there; the catalog adds what it knows of each file (ADR-0015, ADR-0021).
 
 // ── Imports ───────────────────────────────
 use std::collections::{BTreeSet, HashMap};
@@ -15,6 +15,7 @@ use ts_rs::TS;
 use super::catalog;
 use super::disk::{Disk, DiskFile};
 use super::history::locate;
+use super::serve::{MediaView, view_of};
 
 // ── Constants ─────────────────────────────
 /// The most files one page holds (a reload asks for every row the window shows).
@@ -56,7 +57,8 @@ pub enum GallerySort {
 #[ts(export)]
 pub struct GalleryQuery {
     pub kind: Option<String>,
-    pub site: Option<String>,
+    /// Only files in this folder (relative, `/` separators) and its subfolders.
+    pub folder: Option<String>,
     /// Matched anywhere in the file's path, ignoring case.
     pub search: Option<String>,
     pub sort: GallerySort,
@@ -82,9 +84,23 @@ pub struct GalleryItem {
     /// When it was downloaded, or changed on disk when the catalog doesn't know it. Unix seconds.
     #[ts(type = "number")]
     pub downloaded_at: i64,
+    /// What the viewer does with it; `None`: it opens in its app (ADR-0023).
+    pub view: Option<MediaView>,
 }
 
-/// A page of files, how many match in all, and the kinds and sites the folder holds (for the filters).
+/// A folder of the library that holds files, for the sidebar.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GalleryFolder {
+    /// Relative to the library root, with `/` separators.
+    pub path: String,
+    /// Files in it and its subfolders.
+    pub files: u32,
+}
+
+/// A page of files, how many match in all, the kinds the library holds (for the filter) and its folders, in name
+/// order (for the sidebar).
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -92,7 +108,7 @@ pub struct GalleryPage {
     pub items: Vec<GalleryItem>,
     pub total: u32,
     pub kinds: Vec<String>,
-    pub sites: Vec<String>,
+    pub folders: Vec<GalleryFolder>,
 }
 
 /// What the catalog knows of a file.
@@ -142,6 +158,21 @@ fn kind_of(path: &str) -> &'static str {
     }
 }
 
+/// Every folder that holds a file, with its count of files (subfolders' included), sorted by name a level at a time.
+fn folders(items: &[GalleryItem]) -> Vec<GalleryFolder> {
+    let mut counts: HashMap<&str, u32> = HashMap::new();
+    for item in items {
+        let ends = item.path.match_indices('/').map(|(at, _)| at);
+        for end in ends {
+            *counts.entry(&item.path[..end]).or_default() += 1;
+        }
+    }
+    let mut folders: Vec<GalleryFolder> =
+        counts.into_iter().map(|(path, files)| GalleryFolder { path: path.to_string(), files }).collect();
+    folders.sort_by_cached_key(|folder| folder.path.to_lowercase().split('/').map(str::to_string).collect::<Vec<_>>());
+    folders
+}
+
 fn item(file: &DiskFile, known: Option<&Known>) -> GalleryItem {
     GalleryItem {
         name: file.path.rsplit('/').next().unwrap_or(&file.path).to_string(),
@@ -152,6 +183,7 @@ fn item(file: &DiskFile, known: Option<&Known>) -> GalleryItem {
         bytes: file.bytes,
         duration: known.and_then(|known| known.duration),
         downloaded_at: known.map_or(file.modified, |known| known.downloaded_at),
+        view: view_of(&file.path, file.bytes, PICTURES, PICTURE_MAX_BYTES),
     }
 }
 
@@ -162,15 +194,15 @@ pub fn page(root: &Path, disk: &Disk, query: &GalleryQuery) -> Result<GalleryPag
     let known = known(root)?;
     let all: Vec<GalleryItem> = files.iter().map(|file| item(file, known.get(&file.path))).collect();
     let kinds: BTreeSet<String> = all.iter().map(|item| item.kind.clone()).collect();
-    let sites: BTreeSet<String> = all.iter().filter_map(|item| item.site.clone()).collect();
+    let folders = folders(&all);
 
     let kind = query.kind.as_deref().filter(|kind| !kind.is_empty());
-    let site = query.site.as_deref().filter(|site| !site.is_empty());
+    let inside = query.folder.as_deref().filter(|folder| !folder.is_empty()).map(|folder| format!("{folder}/"));
     let search = query.search.as_deref().map(|search| search.trim().to_lowercase()).filter(|search| !search.is_empty());
     let mut items: Vec<GalleryItem> = all
         .into_iter()
         .filter(|item| kind.is_none_or(|kind| item.kind == kind))
-        .filter(|item| site.is_none_or(|site| item.site.as_deref() == Some(site)))
+        .filter(|item| inside.as_deref().is_none_or(|inside| item.path.starts_with(inside)))
         .filter(|item| search.as_deref().is_none_or(|search| item.path.to_lowercase().contains(search)))
         .collect();
     match query.sort {
@@ -185,7 +217,7 @@ pub fn page(root: &Path, disk: &Disk, query: &GalleryQuery) -> Result<GalleryPag
     }
     let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
     let items = items.into_iter().skip(query.offset as usize).take(query.limit.min(MAX_PAGE) as usize).collect();
-    Ok(GalleryPage { items, total, kinds: kinds.into_iter().collect(), sites: sites.into_iter().collect() })
+    Ok(GalleryPage { items, total, kinds: kinds.into_iter().collect(), folders })
 }
 
 /// The library picture at `path` as a `data:` URL, for the lightbox. `None` for a file the window can't show (not a
@@ -225,7 +257,7 @@ mod tests {
     }
 
     fn query(sort: GallerySort) -> GalleryQuery {
-        GalleryQuery { kind: None, site: None, search: None, sort, offset: 0, limit: 50 }
+        GalleryQuery { kind: None, folder: None, search: None, sort, offset: 0, limit: 50 }
     }
 
     #[test]
@@ -278,11 +310,13 @@ mod tests {
             ..query(GallerySort::Name)
         };
         assert_eq!(names(&percent), ["Apple 100%.mp4"]);
-        let site = GalleryQuery {
-            site: Some("b".into()),
+        let folder = GalleryQuery {
+            folder: Some("Videos/b".into()),
             ..query(GallerySort::Name)
         };
-        assert_eq!(names(&site), ["Apple 100%.mp4", "mango_1.mp4"]);
+        assert_eq!(names(&folder), ["added by hand.mkv", "Apple 100%.mp4", "mango_1.mp4"]);
+        let prefix = GalleryQuery { folder: Some("Videos/".into()), ..query(GallerySort::Name) };
+        assert!(names(&prefix).is_empty(), "a folder is matched whole, not as text");
 
         let second = GalleryQuery {
             offset: 1,
@@ -295,7 +329,8 @@ mod tests {
             (4, 1, "Apple 100%.mp4")
         );
         assert_eq!(found.kinds, ["image", "social", "video"]);
-        assert_eq!(found.sites, ["a", "b"]);
+        let folders: Vec<_> = found.folders.iter().map(|folder| (folder.path.as_str(), folder.files)).collect();
+        assert_eq!(folders, [("Images", 1), ("Images/a", 1), ("Videos", 3), ("Videos/b", 3)]);
     }
 
     #[test]

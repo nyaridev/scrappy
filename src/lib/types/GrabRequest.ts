@@ -12,4 +12,8 @@ pageUrl: string,
 /**
  * The page's title: a stream's file name.
  */
-title: string | null, finds: Array<Pick>, };
+title: string | null, finds: Array<Pick>, 
+/**
+ * Once the picked pictures are saved, move the folder's extra copies to the trash, keeping each picture's best.
+ */
+removeDuplicates: boolean, };

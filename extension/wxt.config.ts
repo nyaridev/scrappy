@@ -14,7 +14,10 @@ export default defineConfig({
   manifestVersion: 3,
   manifest: ({ browser }) => ({
     name: "Scrappy",
-    description: "Lists the videos and images on this page and sends the one you pick to the Scrappy app.",
+    description:
+      "Sends videos and images to the Scrappy app: Download buttons on pages, and a list of each page's media.",
+    // The toolbar shows the logo, not a letter.
+    action: { default_icon: { 16: "icon/16.png", 32: "icon/32.png", 48: "icon/48.png" } },
     // Each one is explained in ADR-0006 → Permissions.
     permissions: ["nativeMessaging", "webRequest", "scripting", "cookies"],
     host_permissions: ["<all_urls>"],

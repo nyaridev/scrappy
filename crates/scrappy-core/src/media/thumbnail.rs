@@ -1,8 +1,10 @@
 //! Thumbnail: a small JPEG of a library file for the Gallery, made once with FFmpeg (an image scaled down, a video's
 //! frame a few seconds in) and kept in `.scrappy/thumbs/`. The window gets it as a `data:` URL, so its CSP needs no
-//! asset protocol (ADR-0005). An SVG is sent as it is.
+//! asset protocol (ADR-0005). An SVG is sent as it is. A link whose listing has videos but no picture (a post on X)
+//! gets its first video's first frame the same way, straight from the web, and so does each of Grab's finds.
 
 // ── Imports ───────────────────────────────
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -13,6 +15,7 @@ use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
+use super::{engine, probe};
 use crate::library;
 use crate::tools::{self, Tool, Toolbox};
 
@@ -22,6 +25,8 @@ const WIDTH: u32 = 320;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// How many FFmpeg runs make thumbnails at once; a gallery page asks for dozens.
 const AT_ONCE: usize = 3;
+/// How many web links are read at once for thumbnails; a page of Grab's list asks for up to a hundred.
+const WEB_AT_ONCE: usize = 8;
 /// Where in a video the frame is taken; a shorter video gives its first frame.
 const VIDEO_AT: &str = "3";
 const SVG_MAX_BYTES: u64 = 1_000_000;
@@ -34,6 +39,7 @@ const IMAGE: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "ti
 pub struct Thumbnails {
     toolbox: Toolbox,
     gate: Arc<Semaphore>,
+    web: Arc<Semaphore>,
 }
 
 // ── Private helpers ───────────────────────
@@ -47,27 +53,67 @@ fn fresh(thumb: &Path, file: &Path) -> bool {
     matches!((modified(thumb), modified(file)), (Some(thumb), Some(file)) if thumb >= file)
 }
 
-/// Runs FFmpeg once: one frame of `file`, from `at` seconds in, scaled to `WIDTH` at most, into `out`.
-async fn frame(ffmpeg: &Path, file: &Path, at: Option<&str>, out: &Path) -> bool {
+/// Runs FFmpeg once: one frame of `input` (a file, or a web link), from `at` seconds in, scaled to `WIDTH` at most,
+/// into `out`.
+async fn frame(ffmpeg: &Path, input: &OsStr, at: Option<&str>, out: &Path) -> bool {
     let mut command = tools::command(ffmpeg);
-    command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
+    // A link can't make FFmpeg open anything but the web (a playlist naming `file:` or `pipe:`), nor a file anything
+    // but files.
+    let web = input.to_str().is_some_and(|input| input.starts_with("http"));
+    let protocols = if web { "http,https,tcp,tls,crypto" } else { "file" };
+    command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", protocols]);
     if let Some(at) = at {
         command.args(["-ss", at]);
     }
     command
         .arg("-i")
-        .arg(file)
+        .arg(input)
         .args(["-frames:v", "1", "-vf", &format!("scale='min({WIDTH},iw)':-2"), "-q:v", "5", "-update", "1", "-y"])
         .arg(out);
     let ran = tokio::time::timeout(TIMEOUT, command.output()).await;
     matches!(ran, Ok(Ok(output)) if output.status.success()) && out.is_file()
 }
 
+/// One frame of the web link `url` (already checked), from `at` seconds in, as a `data:` URL.
+async fn web_frame(ffmpeg: &Path, url: &str, at: Option<&str>) -> Option<String> {
+    let dir = tempfile::tempdir().ok()?;
+    let out = dir.path().join("frame.jpg");
+    if !frame(ffmpeg, OsStr::new(url), at, &out).await {
+        return None;
+    }
+    fs::read(&out).ok().map(|bytes| data_url("image/jpeg", &bytes))
+}
+
 // ── Public API ────────────────────────────
+/// The first frame of the video at `url` (http or https only), as a `data:` URL; `None` without FFmpeg, or when the
+/// video can't be read.
+pub(super) async fn video_frame(toolbox: &Toolbox, url: &str) -> Option<String> {
+    let url = engine::check_url(url).ok()?;
+    web_frame(&toolbox.locate(Tool::Ffmpeg).1?, &url, None).await
+}
+
 impl Thumbnails {
     /// Thumbnails made with FFmpeg from `toolbox`.
     pub fn new(toolbox: Toolbox) -> Self {
-        Self { toolbox, gate: Arc::new(Semaphore::new(AT_ONCE)) }
+        Self { toolbox, gate: Arc::new(Semaphore::new(AT_ONCE)), web: Arc::new(Semaphore::new(WEB_AT_ONCE)) }
+    }
+
+    /// The thumbnail of a picture or video on the web (http or https only), as a `data:` URL: a video's frame a few
+    /// seconds in (else its first), a picture scaled down, or sent as it is when FFmpeg can't read it (an SVG).
+    /// `None` when it can't be read.
+    pub async fn of_link(&self, url: &str, video: bool) -> Option<String> {
+        let url = engine::check_url(url).ok()?;
+        let _turn = self.web.acquire().await.ok()?;
+        if let Some(ffmpeg) = self.toolbox.locate(Tool::Ffmpeg).1 {
+            let at = video.then_some(VIDEO_AT);
+            if let Some(found) = web_frame(&ffmpeg, &url, at).await {
+                return Some(found);
+            }
+            if video {
+                return web_frame(&ffmpeg, &url, None).await;
+            }
+        }
+        if video { None } else { probe::thumbnail(Some(&url)).await }
     }
 
     /// The thumbnail of the library file at `path` (relative to `root`), as a `data:` URL. `None` for a file with no
@@ -90,10 +136,11 @@ impl Thumbnails {
             let _turn = self.gate.acquire().await.map_err(|_| "Thumbnails stopped.".to_string())?;
             fs::create_dir_all(&dir).map_err(|e| format!("Can't save thumbnails: {e}"))?;
             let part = thumb.with_extension("part.jpg");
+            let input = file.as_os_str();
             let made = if video {
-                frame(&ffmpeg, &file, Some(VIDEO_AT), &part).await || frame(&ffmpeg, &file, None, &part).await
+                frame(&ffmpeg, input, Some(VIDEO_AT), &part).await || frame(&ffmpeg, input, None, &part).await
             } else {
-                frame(&ffmpeg, &file, None, &part).await
+                frame(&ffmpeg, input, None, &part).await
             };
             if !made || fs::rename(&part, &thumb).is_err() {
                 let _ = fs::remove_file(&part);
@@ -150,6 +197,25 @@ mod tests {
             assert_eq!(thumbnails.get(root, name).await.unwrap().unwrap(), url);
         }
         assert_eq!(fs::read_dir(root.join(".scrappy/thumbs")).unwrap().count(), 2);
+    }
+
+    /// Takes the first frame of a short public video straight from the web, and refuses a local path. Needs
+    /// `SCRAPPY_TOOLS` with FFmpeg and the network.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg in SCRAPPY_TOOLS and the network"]
+    async fn frames_a_web_video() {
+        let toolbox = Toolbox::new(std::env::var("SCRAPPY_TOOLS").expect("SCRAPPY_TOOLS").into());
+        let picture = super::video_frame(&toolbox, "https://www.w3schools.com/html/mov_bbb.mp4").await.unwrap();
+        assert!(picture.starts_with("data:image/jpeg;base64,"));
+        assert_eq!(super::video_frame(&toolbox, "file:///C:/Windows/win.ini").await, None);
+        // Grab's finds: a video, a picture scaled down, and an SVG FFmpeg can't read, sent as it is.
+        let thumbnails = Thumbnails::new(toolbox);
+        let video = thumbnails.of_link("https://www.w3schools.com/html/mov_bbb.mp4", true).await.unwrap();
+        assert!(video.starts_with("data:image/jpeg;base64,"));
+        let picture = thumbnails.of_link("https://www.w3schools.com/html/pic_trulli.jpg", false).await.unwrap();
+        assert!(picture.starts_with("data:image/jpeg;base64,"));
+        let svg = "https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg";
+        assert!(thumbnails.of_link(svg, false).await.unwrap().starts_with("data:image/svg+xml;base64,"));
     }
 
     #[test]

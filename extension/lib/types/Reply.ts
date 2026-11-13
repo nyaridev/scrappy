@@ -3,4 +3,8 @@
 /**
  * The app's answer to one request.
  */
-export type Reply = { "type": "hello", version: string, } | { "type": "queued", id: number, } | { "type": "needsCookies", site: string, } | { "type": "opened", count: number, } | { "type": "error", message: string, };
+export type Reply = { "type": "hello", version: string, } | { "type": "queued", id: number, } | { "type": "needsCookies", site: string, } | { "type": "opened", count: number, } | { "type": "video", title: string, channel: string | null, duration: number | null, 
+/**
+ * A `data:` URL.
+ */
+thumbnail: string | null, count: number | null, files: boolean, } | { "type": "notVideo" } | { "type": "site", site: string, signedIn: boolean, } | { "type": "signedIn", site: string, } | { "type": "error", message: string, };

@@ -1,6 +1,8 @@
 # ADR-0013: Hunt: web search and one content-image finder
 
-**Status:** Accepted
+**Status:** Accepted; packs are also edited in the app since ADR-0020; sources run in parallel with per-source
+limits since ADR-0024; a pack's sites are found through image search since ADR-0026 (the web search stays for
+"Any site")
 **Date:** 2026-11-10
 **Supersedes:** ADR-0009's sources and query detection (its duplicate removal stays)
 
@@ -70,6 +72,7 @@ are part of each page's content, on almost any website, with a switch for each k
   time, the page as Referer); inline ones are written by `hunt` as `inline-<hash>.<ext>`, so the same inline picture
   is saved once.
 - The built-in packs are `general`, `games`, `art` and `people`; a user's pack file with the same name replaces one.
+  Ten more came later, and a pack's optional `group` puts it under a heading in Hunt's list (ADR-0026's notes).
 - The duplicate panel moved to `src/components/` so Hunt can scan its own folder with it.
 - After the first real use: "Full-size links" on wikis point at `File:Cat.png` pages, which answer with HTML. A media
   save (image, video, audio) now refuses a web page before reading it, an image takes its extension from the type

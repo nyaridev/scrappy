@@ -59,15 +59,20 @@ pub fn images(root: &Path, folder: Option<&str>) -> Result<Vec<ImageRow>, String
         .collect())
 }
 
-/// Keeps a picture's perceptual hash, width and height with its catalog row.
-pub fn set_fingerprint(root: &Path, path: &str, (hash, width, height): (u64, u32, u32)) -> Result<(), String> {
-    catalog::open(root)?
-        .execute(
-            "UPDATE downloads SET phash = ?1, width = ?2, height = ?3 WHERE path = ?4",
-            params![hash as i64, width, height, path],
-        )
-        .map_err(|e| format!("Can't update the library catalog: {e}"))?;
-    Ok(())
+/// Keeps each picture's perceptual hash, width and height with its catalog row, all in one transaction.
+pub fn set_fingerprints(root: &Path, made: &[(String, (u64, u32, u32))]) -> Result<(), String> {
+    let failed = |e: rusqlite::Error| format!("Can't update the library catalog: {e}");
+    let mut connection = catalog::open(root)?;
+    let transaction = connection.transaction().map_err(failed)?;
+    for (path, (hash, width, height)) in made {
+        transaction
+            .execute(
+                "UPDATE downloads SET phash = ?1, width = ?2, height = ?3 WHERE path = ?4",
+                params![*hash as i64, width, height, path],
+            )
+            .map_err(failed)?;
+    }
+    transaction.commit().map_err(failed)
 }
 
 /// Drops the catalog rows of files that left the library; the files themselves aren't touched.
@@ -84,7 +89,7 @@ pub fn forget(root: &Path, paths: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{forget, images, set_fingerprint};
+    use super::{forget, images, set_fingerprints};
     use crate::library::catalog::{self, Record};
     use std::fs;
 
@@ -116,7 +121,7 @@ mod tests {
         assert_eq!(paths(images(root, Some("Images/a")).unwrap()), ["Images/a/one.JPG"]);
 
         // The top bit set: it must survive SQLite's signed integers.
-        set_fingerprint(root, "Images/b/two.png", (u64::MAX - 5, 640, 480)).unwrap();
+        set_fingerprints(root, &[("Images/b/two.png".into(), (u64::MAX - 5, 640, 480))]).unwrap();
         let two = images(root, Some("Images/b")).unwrap().remove(0);
         assert_eq!(two.fingerprint, Some((u64::MAX - 5, 640, 480)));
         // Downloaded again: the row starts without a hash.

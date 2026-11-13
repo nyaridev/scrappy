@@ -1,19 +1,41 @@
-// DownloadQueue: the kept downloads, newest first: thumbnail, title, preset, where each one is (files done of the
+// DownloadQueue: the kept downloads, newest first: thumbnail, title, preset (for files kept as they are, their types:
+// `MP4`, or `JPG, MP4, PNG`), where each one is (files done of the
 // total for a playlist or profile), a progress bar while it runs, and a stop button (queued or running), or a
-// show-in-folder button (done) and a remove button (finished). Right-click: the same, plus Open and Copy link.
+// show-in-folder button (done, or failed where it had a folder) and a remove button (finished). A done row with a
+// note (kept without audio) shows it in orange. Right-click: the same, plus Open and Copy link. A long list is shown
+// a page at a time.
 
-import { ContextMenu, Icon, IconButton, Image, type MenuEntry, ProgressBar, Tooltip } from "iro-ui";
-import { AlertCircleIcon, CheckCircleIcon, CloseIcon, PlayIcon, StopIcon } from "iro-ui/icons";
-import { memo, useEffect, useRef, useState } from "react";
-import { copyLinkItem, fileMenu } from "../../components/fileMenu";
-import { ShowInFolderButton } from "../../components/ShowInFolderButton";
-import { formatBytes, formatCount } from "../../lib/format";
-import type { DownloadEntry } from "../../lib/types/DownloadEntry";
-import type { JobProgress } from "../../lib/types/JobProgress";
+import { ContextMenu, Icon, IconButton, Image, type MenuEntry, Pagination, ProgressBar, Tooltip } from "iro-ui";
+import {
+  AlertCircleIcon,
+  CheckCircleIcon,
+  CloseIcon,
+  GlobeIcon,
+  type IconData,
+  PlayIcon,
+  SearchIcon,
+  StopIcon,
+  TargetIcon,
+} from "iro-ui/icons";
+import { memo, useRef, useState } from "react";
+import { formatBytes, formatCount } from "../lib/format";
+import type { DownloadEntry } from "../lib/types/DownloadEntry";
+import type { DownloadSource } from "../lib/types/DownloadSource";
+import type { JobProgress } from "../lib/types/JobProgress";
+import { copyLinkItem, fileMenu } from "./fileMenu";
+import { ShowInFolderButton } from "./ShowInFolderButton";
 
 // ── Constants ─────────────────────────────
-/** Rows drawn at first, and added each time the end of the list comes near: a grab can add a thousand. */
-const PAGE = 100;
+/** Rows on one page: a grab can add a thousand. */
+const PAGE_SIZE = 50;
+/** A row without a thumbnail shows the icon of the view it came from. */
+const SOURCE_ICONS: Record<DownloadSource, IconData> = {
+  download: PlayIcon,
+  extension: PlayIcon,
+  grab: TargetIcon,
+  scrape: GlobeIcon,
+  hunt: SearchIcon,
+};
 
 // ── Private helpers ───────────────────────
 /** The entry's state, counting a queued entry as running once its job reports progress (the list refreshes only
@@ -34,7 +56,7 @@ function savedText(entry: DownloadEntry): string {
 function detail(entry: DownloadEntry, progress: JobProgress | undefined): string {
   switch (stateOf(entry, progress)) {
     case "done":
-      return savedText(entry);
+      return [entry.error, savedText(entry)].filter(Boolean).join(" · ");
     case "failed":
       return entry.error ?? "Failed";
     case "cancelled":
@@ -89,29 +111,31 @@ const DownloadRow = memo(
     const text = detail(entry, report);
     const finished = state === "done" || state === "failed";
     const stoppable = state === "queued" || state === "running";
+    const noted = state === "done" && entry.error != null;
     const menu: MenuEntry[] = [
-      ...(state === "done" && entry.file ? fileMenu(entry.file) : []),
-      copyLinkItem(entry.url),
+      ...(finished && entry.file ? fileMenu(entry.file) : []),
+      ...(entry.url ? [copyLinkItem(entry.url)] : []),
       ...(stoppable ? [{ label: "Stop", icon: <Icon icon={StopIcon} />, onSelect: () => onCancel(entry.id) }] : []),
       ...(stoppable ? [] : [{ label: "Remove", icon: <Icon icon={CloseIcon} />, onSelect: () => onRemove(entry.id) }]),
     ];
     return (
       <ContextMenu items={menu}>
-        <li className="queue-row" data-state={state}>
+        <li className="queue-row" data-state={state} data-noted={noted || undefined}>
           {entry.thumbnail ? (
             <Image className="queue-thumbnail" src={entry.thumbnail} alt="" ratio={16 / 9} />
           ) : (
             <span className="queue-thumbnail queue-thumbnail-empty">
-              <Icon icon={PlayIcon} />
+              <Icon icon={SOURCE_ICONS[entry.source]} />
             </span>
           )}
-          <Tooltip content={entry.url}>
+          <Tooltip content={entry.url} disabled={!entry.url}>
             <span className="queue-title">{entry.title}</span>
           </Tooltip>
-          <span className="queue-preset">{entry.preset}</span>
+          {/* Files kept as they are name their types in the preset's place. */}
+          <span className="queue-preset">{entry.types.length > 0 ? entry.types.join(", ") : entry.preset}</span>
           <Tooltip content={text} disabled={!finished}>
             <span className={finished ? "queue-detail selectable" : "queue-detail"}>
-              {state === "done" && <Icon icon={CheckCircleIcon} />}
+              {state === "done" && <Icon icon={noted ? AlertCircleIcon : CheckCircleIcon} />}
               {state === "failed" && <Icon icon={AlertCircleIcon} />}
               <span className="queue-detail-text">{text}</span>
             </span>
@@ -120,7 +144,7 @@ const DownloadRow = memo(
             {stoppable && (
               <IconButton size="sm" icon={<Icon icon={StopIcon} />} label="Stop" onClick={() => onCancel(entry.id)} />
             )}
-            {state === "done" && entry.file && <ShowInFolderButton path={entry.file} />}
+            {finished && entry.file && <ShowInFolderButton path={entry.file} />}
             {!stoppable && (
               <IconButton
                 size="sm"
@@ -153,26 +177,33 @@ export const DownloadQueue = memo(function DownloadQueue({
   onCancel: (id: number) => void;
   onRemove: (id: number) => void;
 }) {
-  const [limit, setLimit] = useState(PAGE);
-  const end = useRef<HTMLLIElement>(null);
-  const more = entries.length > limit;
+  const [pageNumber, setPageNumber] = useState(1);
+  const top = useRef<HTMLUListElement>(null);
+  // Rows leave as they're removed or cleared: a page past the end shows the last one.
+  const current = Math.min(pageNumber, Math.max(1, Math.ceil(entries.length / PAGE_SIZE)));
+  const rows = entries.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
-  useEffect(() => {
-    const target = end.current;
-    if (!more || !target) return;
-    const observer = new IntersectionObserver((seen) => seen[0]?.isIntersecting && setLimit((n) => n + PAGE), {
-      rootMargin: "600px",
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [more]);
+  function turnPage(next: number) {
+    setPageNumber(next);
+    top.current?.scrollIntoView({ block: "start" });
+  }
 
   return (
-    <ul className="queue" aria-label="Downloads">
-      {entries.slice(0, limit).map((entry) => (
-        <DownloadRow key={entry.id} entry={entry} report={progress[entry.id]} onCancel={onCancel} onRemove={onRemove} />
-      ))}
-      {more && <li ref={end} className="queue-end" aria-hidden />}
-    </ul>
+    <>
+      <ul ref={top} className="queue" aria-label="Downloads">
+        {rows.map((entry) => (
+          <DownloadRow
+            key={entry.id}
+            entry={entry}
+            report={progress[entry.id]}
+            onCancel={onCancel}
+            onRemove={onRemove}
+          />
+        ))}
+      </ul>
+      {entries.length > PAGE_SIZE && (
+        <Pagination page={current} pageSize={PAGE_SIZE} total={entries.length} onPageChange={turnPage} />
+      )}
+    </>
   );
 });

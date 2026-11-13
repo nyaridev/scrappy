@@ -101,6 +101,7 @@ mod tests {
     fn entry(id: u32, state: DownloadState) -> DownloadEntry {
         DownloadEntry {
             id,
+            source: crate::media::DownloadSource::Download,
             url: "https://example.com/v".into(),
             title: format!("Video {id}"),
             preset: "MP4".into(),
@@ -111,6 +112,7 @@ mod tests {
             skipped: None,
             size: None,
             error: None,
+            types: Vec::new(),
         }
     }
 

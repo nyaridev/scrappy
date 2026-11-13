@@ -30,7 +30,7 @@ pub(super) fn file(url: &Url) -> PathBuf {
 }
 
 /// Saves the page as one file and adds it to the catalog as a `site` row.
-pub(super) async fn run(root: PathBuf, plan: Plan, job: Job) -> Result<(), String> {
+pub(super) async fn run(root: PathBuf, plan: Plan, job: Job) -> Result<u64, String> {
     job.items(0, Some(1), None);
     let url = plan.url.to_string();
     let saved = tokio::task::spawn_blocking(move || {
@@ -70,7 +70,7 @@ pub(super) async fn run(root: PathBuf, plan: Plan, job: Job) -> Result<(), Strin
         },
     )?;
     job.items(1, Some(1), None);
-    Ok(())
+    Ok(1)
 }
 
 #[cfg(test)]
@@ -119,7 +119,8 @@ mod tests {
         let vault = Vault::open(&dir.path().join("vault"), KeySource::Fixed([1; 32]));
         let downloads = Downloads::new(Toolbox::new(dir.path().join("tools")), vault);
 
-        let started = crawl(&downloads, &jobs, root.clone(), request(&address, CrawlMode::Page)).unwrap();
+        let mirrors = crate::crawl::Mirrors::default();
+        let started = crawl(&downloads, &jobs, &mirrors, root.clone(), request(&address, CrawlMode::Page)).unwrap();
         while ended.lock().unwrap().is_empty() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

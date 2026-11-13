@@ -1,4 +1,15 @@
-# Games: the whole web, plus game wikis and art sites.
+# Games: game wikis, game art and cover databases, art sites and communities.
 name = "Games"
-web = true
-sites = ["fandom.com", "wikipedia.org", "artstation.com", "deviantart.com"]
+group = "Entertainment"
+web = false
+sites = [
+  "fandom.com",
+  "wikipedia.org",
+  "steamgriddb.com",
+  "mobygames.com",
+  "igdb.com",
+  "artstation.com",
+  "deviantart.com",
+  "steamcommunity.com",
+  "reddit.com",
+]

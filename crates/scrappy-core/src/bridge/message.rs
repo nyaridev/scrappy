@@ -83,6 +83,13 @@ pub enum Request {
         title: Option<String>,
         finds: Vec<Noted>,
     },
+    /// What would downloading this page save? Only a site reader's answer counts, not yt-dlp's generic one
+    /// (ADR-0042).
+    Look { url: String },
+    /// The page's site, and whether its sign-in is remembered.
+    Site { url: String },
+    /// Remember this page's site's sign-in, downloading nothing.
+    SignIn { url: String, cookies: Vec<Cookie> },
 }
 
 /// The app's answer to one request.
@@ -97,6 +104,23 @@ pub enum Reply {
     NeedsCookies { site: String },
     /// Opened in Grab with this many finds.
     Opened { count: u32 },
+    /// A page a site reader knows: what downloading it saves. `count` for a list, post or profile; `files` when its
+    /// files are saved as they are.
+    Video {
+        title: String,
+        channel: Option<String>,
+        duration: Option<f64>,
+        /// A `data:` URL.
+        thumbnail: Option<String>,
+        count: Option<u32>,
+        files: bool,
+    },
+    /// No site reader knows the page.
+    NotVideo,
+    /// The page's site; `signed_in` when its sign-in is remembered.
+    Site { site: String, signed_in: bool },
+    /// The site's sign-in is remembered.
+    SignedIn { site: String },
     Error { message: String },
 }
 
@@ -192,6 +216,21 @@ pub fn check(
     Ok(Checked { url, kind, page_url: page_url.map(web_link).transpose()?, title, headers: allowed(headers)?, grant })
 }
 
+/// Checks a sign-in shared without a download: a web link with a site, and cookies of that site only (ADR-0005).
+pub fn check_sign_in(url: &str, cookies: Vec<Cookie>) -> Result<(String, Vec<Cookie>), String> {
+    let site = vault::site_of(&web_link(url)?).ok_or("This page has no site to sign in to.")?;
+    if cookies.is_empty() {
+        return Err(format!("No cookies for {site}. Sign in there in your browser first."));
+    }
+    let cookies = vault::check_cookies(&site, cookies)?;
+    Ok((site, cookies))
+}
+
+/// Checks a link the extension asks about: a web link only.
+pub fn check_page(url: &str) -> Result<String, String> {
+    web_link(url)
+}
+
 /// Checks a page handed to Grab and sorts what was noted on it: a web link, a clean title, at most 2000 notes.
 /// Notes too long to be real are dropped; `grab` drops anything that isn't a web link or a find.
 pub fn check_grab(page_url: &str, title: Option<&str>, finds: Vec<Noted>) -> Result<PageScan, String> {
@@ -203,7 +242,7 @@ pub fn check_grab(page_url: &str, title: Option<&str>, finds: Vec<Noted>) -> Res
         .into_iter()
         .filter(|noted| noted.url.len() <= MAX_URL && noted.mime.as_ref().is_none_or(|mime| mime.len() <= MAX_MIME))
         .map(|noted| Seen { url: noted.url, mime: noted.mime, size: noted.size });
-    Ok(PageScan { url, title: clean_title(title), finds: grab::collect(seen) })
+    Ok(PageScan { url, title: clean_title(title), finds: grab::collect(seen), pages: 1, kept: Default::default() })
 }
 
 impl Reply {
@@ -215,7 +254,7 @@ impl Reply {
 
 #[cfg(test)]
 mod tests {
-    use super::{CookieGrant, Header, MediaKind, Noted, Reply, Request, check, check_grab};
+    use super::{CookieGrant, Header, MediaKind, Noted, Reply, Request, check, check_grab, check_sign_in};
     use crate::vault::Cookie;
 
     fn cookie(domain: &str) -> Cookie {
@@ -287,6 +326,18 @@ mod tests {
         assert!(check(url, MediaKind::Video, None, None, Vec::new(), grant(".google.com")).is_err());
         let short = check("https://youtu.be/a", MediaKind::Video, None, None, Vec::new(), grant(".youtube.com"));
         assert_eq!(short.unwrap().grant.unwrap().site, "youtube.com");
+    }
+
+    #[test]
+    fn shares_a_sign_in_only_with_its_own_site() {
+        let page = "https://www.instagram.com/p/abc/";
+        let (site, kept) = check_sign_in(page, vec![cookie(".instagram.com")]).unwrap();
+        assert_eq!((site.as_str(), kept.len()), ("instagram.com", 1));
+        assert!(check_sign_in(page, vec![cookie(".evil.com")]).is_err());
+        assert!(check_sign_in(page, Vec::new()).is_err());
+        assert!(check_sign_in("file:///C:/x", vec![cookie(".instagram.com")]).is_err());
+        let ask = Request::parse(br#"{"type":"look","url":"https://a.com/"}"#).unwrap();
+        assert_eq!(ask, Request::Look { url: "https://a.com/".into() });
     }
 
     #[test]

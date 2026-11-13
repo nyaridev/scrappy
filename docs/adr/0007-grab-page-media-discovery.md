@@ -1,6 +1,7 @@
 # ADR-0007: Grab: finding everything downloadable on a page
 
-**Status:** Accepted
+**Status:** Accepted; the deep scan runs as a job since ADR-0019, and follows linked pages since ADR-0029;
+saving as found since ADR-0031; browser only, to a depth, since ADR-0032
 **Date:** 2026-11-10
 
 ## Context

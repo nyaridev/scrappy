@@ -4,7 +4,11 @@ import type { GallerySort } from "./GallerySort";
 /**
  * One page of the gallery: what to filter by, how to sort, and where the page starts.
  */
-export type GalleryQuery = { kind: string | null, site: string | null, 
+export type GalleryQuery = { kind: string | null, 
+/**
+ * Only files in this folder (relative, `/` separators) and its subfolders.
+ */
+folder: string | null, 
 /**
  * Matched anywhere in the file's path, ignoring case.
  */

@@ -1,6 +1,7 @@
 # ADR-0002: External engines as managed tools
 
-**Status:** Accepted; its sources and checksum timing are updated by ADR-0012
+**Status:** Accepted; its sources and checksum timing are updated by ADR-0012; the window's probe lists as it comes
+(ADR-0030)
 **Date:** 2026-11-10
 
 ## Context
@@ -48,7 +49,8 @@ Deno and ffmpeg on demand; Rust can't load yt-dlp as a library.
   `--cookies`, `--range`) instead of a config file written per run. It prints each saved file's path, and `# path`
   for one its archive skipped. Its layout `Social/<site>/<user>/` is ADR-0004's.
 - Every yt-dlp run passes `--no-playlist`; the probe adds `--yes-playlist` for a video link that names a playlist
-  (`watch?v=…&list=PL…`), but not a YouTube Mix (`list=RD…`), which stays the one video.
+  (`watch?v=…&list=PL…`), a YouTube Mix (`list=RD…`) included. Such a list's probe carries the video's own link (the
+  link without `list`, `index`, `start_radio`, `pp`), and the Download view's "Just this video" checks that instead.
 - Playlists and channels: the probe lists them with `--flat-playlist --playlist-items 1-1000` (ADR-0016); the download runs
   yt-dlp with `--yes-playlist -i --no-quiet` and counts saved and skipped videos from its output, then checks and
   encodes each one with the preset.

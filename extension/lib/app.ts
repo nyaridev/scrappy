@@ -7,7 +7,7 @@ import type { Request } from "./types/Request";
 // ── Constants ─────────────────────────────
 const HOST = "com.nyaridev.scrappy";
 /** A video send waits for the app to read the link with yt-dlp first. */
-const TIMEOUT_MS = 120_000;
+export const SEND_TIMEOUT_MS = 120_000;
 
 // ── Public API ────────────────────────────
 /** Sends one request and waits for the app's reply; rejects with a readable message when the app can't be reached. */
@@ -17,7 +17,7 @@ export function sendToApp(request: Request): Promise<Reply> {
     const timer = setTimeout(() => {
       port.disconnect();
       reject(new Error("Scrappy didn't answer."));
-    }, TIMEOUT_MS);
+    }, SEND_TIMEOUT_MS);
     port.onMessage.addListener((reply: Reply) => {
       clearTimeout(timer);
       port.disconnect();

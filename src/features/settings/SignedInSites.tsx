@@ -1,7 +1,7 @@
 // SignedInSites: the sites whose browser sign-in Scrappy remembers (shared from the extension), each with Forget (also on
 // right-click).
 
-import { Button, ContextMenu, Icon, SectionTitle, toast } from "iro-ui";
+import { Button, ContextMenu, Icon, Panel, SectionTitle, toast } from "iro-ui";
 import { KeyIcon, TrashIcon } from "iro-ui/icons";
 import { useCached } from "../../app/useCached";
 import { forgetSite, signedInSites } from "../../lib/backend";
@@ -21,7 +21,7 @@ export function SignedInSites() {
   }
 
   return (
-    <section className="settings-section">
+    <Panel as="section" className="settings-section">
       <SectionTitle icon={<Icon icon={KeyIcon} />}>Signed-in sites</SectionTitle>
       {sites?.length === 0 && <p className="settings-hint">None</p>}
       {sites && sites.length > 0 && (
@@ -51,6 +51,6 @@ export function SignedInSites() {
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }

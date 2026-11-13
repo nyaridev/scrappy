@@ -1,6 +1,6 @@
 # ADR-0005: Security and secrets
 
-**Status:** Accepted; the window's capability is widened by ADR-0011 (window-control permissions)
+**Status:** Accepted; the window's capability is widened by ADR-0011 (window-control permissions), its CSP by ADR-0023 (`media-src` for the app's media protocol); a sign-in can be shared from the popup without a download: ADR-0042
 **Date:** 2026-11-10
 
 ## Context

@@ -8,6 +8,8 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::media::Thumbnails;
+
 // ── Constants ─────────────────────────────
 const VIDEO: &[&str] = &["mp4", "m4v", "webm", "mkv", "mov", "avi", "flv", "wmv", "ogv", "3gp"];
 const AUDIO: &[&str] = &["mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "weba"];
@@ -47,8 +49,13 @@ pub struct Seen {
     pub size: Option<u64>,
 }
 
+/// A scan's finds as its requests and links come in: one per link, however many pages show it, so a scan of
+/// thousands of pages holds each file once.
+#[derive(Debug, Clone, Default)]
+pub struct Found(HashMap<String, Find>);
+
 /// One downloadable thing on a page.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Find {
@@ -131,25 +138,56 @@ pub fn classify(url: &str, mime: Option<&str>) -> Option<FindKind> {
     mime.and_then(by_mime).or_else(|| ext.as_deref().and_then(by_extension))
 }
 
-/// A page's requests and links as finds: sorted, one per link (the largest size seen wins), at most `MAX_FINDS`.
-pub fn collect(seen: impl IntoIterator<Item = Seen>) -> Vec<Find> {
-    let mut finds: HashMap<String, Find> = HashMap::new();
-    for item in seen {
-        let Some(kind) = classify(&item.url, item.mime.as_deref()) else { continue };
-        let Ok(url) = Url::parse(&item.url) else { continue };
-        if finds.len() >= MAX_FINDS && !finds.contains_key(&item.url) {
-            continue;
-        }
-        let find = finds.entry(item.url.clone()).or_insert_with(|| Find { name: name_of(&url), url: item.url, kind, size: None });
+impl Find {
+    /// A find of `kind` at `url`, named after its file, its size unknown. `None` for anything but a web link.
+    pub fn new(url: &str, kind: FindKind) -> Option<Find> {
+        let parsed = Url::parse(url).ok().filter(|url| matches!(url.scheme(), "http" | "https"))?;
+        Some(Find { name: name_of(&parsed), url: url.to_string(), kind, size: None })
+    }
+}
+
+/// The thumbnail of the find at `url`, as a `data:` URL: a picture scaled down, a video's or stream's frame. `None`
+/// for audio and files, or when it can't be read.
+pub async fn thumbnail(thumbnails: &Thumbnails, url: &str, kind: FindKind) -> Option<String> {
+    match kind {
+        FindKind::Image => thumbnails.of_link(url, false).await,
+        FindKind::Video | FindKind::Stream => thumbnails.of_link(url, true).await,
+        FindKind::Audio | FindKind::Other => None,
+    }
+}
+
+impl Found {
+    /// Adds a request or link: a new find, or more about one already found (the largest size seen wins, and a
+    /// response's MIME type beats a guess from a link). One that isn't a find is skipped.
+    pub fn add(&mut self, item: Seen) {
+        let Some(kind) = classify(&item.url, item.mime.as_deref()) else { return };
+        let Ok(url) = Url::parse(&item.url) else { return };
+        let find = self.0.entry(item.url.clone()).or_insert_with(|| Find { name: name_of(&url), url: item.url, kind, size: None });
         find.size = find.size.max(item.size);
-        // A response's MIME type beats a guess from a link found in the page.
         if item.mime.is_some() {
             find.kind = kind;
         }
     }
-    let mut finds: Vec<Find> = finds.into_values().collect();
-    finds.sort_by(|a, b| (a.kind, &a.name, &a.url).cmp(&(b.kind, &b.name, &b.url)));
-    finds
+
+    /// Every find, in no order.
+    pub fn all(&self) -> impl Iterator<Item = &Find> {
+        self.0.values()
+    }
+
+    /// The finds the window lists: sorted by type, then name, at most `MAX_FINDS`.
+    pub fn finds(&self) -> Vec<Find> {
+        let mut finds: Vec<Find> = self.0.values().cloned().collect();
+        finds.sort_by(|a, b| (a.kind, &a.name, &a.url).cmp(&(b.kind, &b.name, &b.url)));
+        finds.truncate(MAX_FINDS);
+        finds
+    }
+}
+
+/// A page's requests and links as finds: sorted, one per link (the largest size seen wins), at most `MAX_FINDS`.
+pub fn collect(seen: impl IntoIterator<Item = Seen>) -> Vec<Find> {
+    let mut found = Found::default();
+    seen.into_iter().for_each(|item| found.add(item));
+    found.finds()
 }
 
 #[cfg(test)]

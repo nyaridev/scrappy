@@ -1,0 +1,13 @@
+# Free stock photos: free photo libraries and public domain images.
+name = "Free stock photos"
+group = "Photos"
+web = false
+sites = [
+  "unsplash.com",
+  "pexels.com",
+  "pixabay.com",
+  "stocksnap.io",
+  "kaboompics.com",
+  "rawpixel.com",
+  "commons.wikimedia.org",
+]

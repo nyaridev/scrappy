@@ -1,6 +1,7 @@
 # ADR-0016: The Download list is kept; a channel's lists are picked one by one
 
-**Status:** Accepted
+**Status:** Accepted; where the list shows is superseded by ADR-0018 (the Downloads view); lists load as they come
+(ADR-0030)
 **Date:** 2026-11-11
 **Supersedes:** the README's "The Download list lasts one session" (Later); ADR-0002's probe listing 50 entries
 

@@ -8,18 +8,18 @@ rules load from the `CLAUDE.md` files above this folder; this file covers only w
 A desktop app (Windows, macOS, Linux) for Nari. It downloads videos and media from YouTube, X, Instagram, Facebook and
 any other site, finds everything downloadable on a page (including chunked streams), crawls and mirrors sites, hunts
 for images by topic with duplicate removal, and keeps a gallery and stats of it all. A small browser extension sends a
-page's videos and images to the app. Stage: M14 (builds and installers) is done; `docs/adr/README.md` tracks the milestones.
+page's videos and images to the app. Stage: M15 (changing the library folder) and M16–M17 are done; `docs/adr/README.md` tracks the milestones.
 
 ## Commands
 
 | Command | What |
 |---|---|
 | `start-dev.bat` | Opens the app with hot reload (`pnpm tauri dev`), installing packages on the first run |
-| `build.bat` | Builds for Windows into `release\`: the installer, the portable app and its zip, and the extension's Chrome and Firefox zips |
-| `git tag vX.Y.Z` + push the tag | Builds the installers on GitHub into a draft release (`.github/workflows/release.yml`) |
+| `build.bat` | Builds for Windows into `release\`: the installer and the extension's Chrome and Firefox zips |
+| `git tag vX.Y.Z` + push the tag | Builds the signed installers and `latest.json` on GitHub into a draft release (`.github/workflows/release.yml`); publish it for the app's updater to see it (ADR-0037) |
 | `pnpm dev` | The window alone in a browser, on fake data (port 4430) |
 | `pnpm check` | Size and boundary checks, tsc (app and extension), Biome, Vitest, `cargo test`, clippy. Must pass before a task is done |
-| `cargo test -p scrappy-core -- --ignored` | Downloads every pinned tool from GitHub (about 300 MB): run it after changing a pin |
+| `cargo test -p scrappy-core -- --ignored` | Downloads every pinned tool from GitHub (about 300 MB) and searches the three image engines: run it after changing a pin, or when a Hunt engine source fails |
 | `pnpm types` | Regenerates `src/lib/types/` and `extension/lib/types/` from the Rust types (ts-rs) |
 | `pnpm format` | Biome format and fix |
 | `pnpm -C extension build` / `build:firefox` | Builds the extension into `extension/.output/` (`zip` / `zip:firefox` for the zips) |
@@ -34,8 +34,8 @@ Rust builds put their intermediate files in the workspace's `_cache/`; the final
 | `crates/scrappy-core/` | All logic, one module per system. Never uses Tauri |
 | `crates/scrappy-host/` | The native-messaging relay the browser starts |
 | `src-tauri/` | The Tauri shell: setup, `window.rs` (the frameless window), `events.rs` (job events), `commands/<area>.rs`, capabilities |
-| `src/` | The window: `app/` (header and view list), `features/<view>/`, `lib/backend.ts`, `lib/types/` (generated) |
-| `extension/` | The WXT browser extension: a background script and one popup; `lib/types/` is generated |
+| `src/` | The window: `app/` (header and view list), `features/<view>/`, `lib/backend.ts` (with its preview data in `lib/fakeData.ts`), `lib/types/` (generated) |
+| `extension/` | The WXT browser extension: a background script, one popup, and the in-page buttons (`entrypoints/buttons.content.ts`, `lib/buttons/`, one file per site in `lib/sites/`); `lib/types/` is generated |
 | `docs/adr/` | Architecture overview, decisions and milestone tracker |
 | `scripts/` | `check-size.mjs`, `check-boundaries.mjs`, `register-host.mjs` |
 | `assets/brand/` | The README's banners, dark and light, and `icon.svg`, the app icon (`pnpm tauri icon assets/brand/icon.svg` makes `src-tauri/icons/`) |

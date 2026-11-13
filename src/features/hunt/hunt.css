@@ -1,0 +1,123 @@
+/* Hunt: the pack menu with its Edit button, the packs dialog (its pack picker and list of sites), and a hunt's sources.
+   The rest of Hunt's layout is in `src/styles.css`. */
+
+/* The menu takes the room left; Edit keeps its size. */
+.hunt-pack {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+}
+
+.hunt-pack-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Remove duplicates sits at the left of the actions row; Hunt and Stop stay at the right. */
+.hunt-dedupe {
+  margin-right: auto;
+}
+
+/* The most images the hunt saves, beside Hunt. */
+.hunt-estimate {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+  white-space: nowrap;
+}
+
+.pack-editor {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+/* The pack picker takes the room left; New pack keeps its size. */
+.pack-pick {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+}
+
+.pack-pick-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Delete sits at the left of the footer, away from Save. */
+.pack-delete {
+  margin-right: auto;
+}
+
+/* One site a line: its switch, then Remove at the right. Long lists scroll inside the dialog. */
+.pack-sites {
+  display: grid;
+  gap: var(--iro-space-1);
+  max-height: calc(var(--iro-space-6) * 12);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.pack-site {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.pack-empty {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* ── Sources ───────────────────────────── */
+/* A hunt's sources, one a line: its dot, name, state, bar and count. The name, bar and count columns keep their width,
+   so they line up down the list; the state takes the rest, on one line. */
+.hunt-sources {
+  display: grid;
+  grid-template-columns:
+    auto minmax(0, calc(var(--iro-space-6) * 6)) minmax(0, 1fr) calc(var(--iro-space-6) * 4)
+    calc(var(--iro-space-6) * 2);
+  gap: var(--iro-space-2) var(--iro-space-4);
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  font-size: var(--iro-text-sm);
+  list-style: none;
+}
+
+.hunt-source {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+.hunt-source-name,
+.hunt-source-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hunt-source-name {
+  font-weight: 500;
+}
+
+.hunt-source-state {
+  color: var(--iro-fg-3);
+}
+
+.hunt-source-state[data-state="failed"] {
+  color: var(--iro-danger);
+}
+
+.hunt-source-count {
+  color: var(--iro-fg-2);
+  font-family: var(--iro-font-mono);
+  font-size: var(--iro-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}

@@ -1,6 +1,6 @@
 // Scan: runs inside the page (through `scripting.executeScript`) and lists its videos and images: video and audio
-// elements, images (the largest `srcset` candidate), social preview tags and CSS backgrounds. It must stay
-// self-contained: the browser copies only this function's source into the page.
+// elements, images (the largest `srcset` candidate), social preview tags and CSS backgrounds, with the sizes the page's
+// resource timing knows. It must stay self-contained: the browser copies only this function's source into the page.
 
 import type { Found } from "./media";
 
@@ -20,11 +20,16 @@ export function scanPage(): Found[] {
       return null;
     }
   };
+  // Cross-origin files without `Timing-Allow-Origin` report 0: no size then.
+  const bytesOf = (url: string): number | undefined => {
+    const entry = performance.getEntriesByName(url).at(-1) as PerformanceResourceTiming | undefined;
+    return entry?.encodedBodySize || entry?.decodedBodySize || undefined;
+  };
   const add = (link: string | null | undefined, item: Omit<Found, "url" | "format">) => {
     const url = absolute(link);
     if (!url || seen.has(url)) return;
     seen.add(url);
-    found.push({ url, format: null, ...item });
+    found.push({ url, format: null, size: bytesOf(url), ...item });
   };
   const largestInSrcset = (srcset: string): string | null => {
     let best: { url: string; width: number } | null = null;
@@ -43,6 +48,7 @@ export function scanPage(): Found[] {
       width: video?.videoWidth || undefined,
       height: video?.videoHeight || undefined,
       preview: absolute(video?.poster) ?? undefined,
+      duration: Number.isFinite(media.duration) && media.duration > 0 ? media.duration : undefined,
     };
     add(media.currentSrc || media.src, item);
     for (const source of media.querySelectorAll("source")) add(source.src, item);

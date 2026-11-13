@@ -10,13 +10,20 @@ mod engine;
 mod gallery;
 mod file;
 mod inspect;
+mod listing;
 mod playlist;
 mod presets;
 mod probe;
+mod probes;
 mod route;
 mod thumbnail;
 
-pub use downloads::{DownloadEntry, DownloadRequest, DownloadState, Downloads, SaveRequest, SendError};
+pub use download::example_name;
+pub use downloads::{
+    DownloadEntry, DownloadRequest, DownloadSource, DownloadState, Downloads, Row, SaveRequest, SendError, SentFrom,
+};
+pub use engine::set_media_options;
 pub use presets::{PresetInfo, presets};
 pub use probe::{ListEntry, Probe, Section};
+pub use probes::Probes;
 pub use thumbnail::Thumbnails;

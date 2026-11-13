@@ -1,0 +1,114 @@
+/* The Settings view: its tabs, sections and signed-in sites. */
+
+/* ── Settings ──────────────────────────── */
+.settings {
+  display: grid;
+  gap: var(--iro-space-6);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 26));
+}
+
+/* A tab's sections, one under another. */
+.settings .iro-tabs-panel {
+  display: grid;
+  gap: var(--iro-space-6);
+  padding-top: var(--iro-space-5);
+}
+
+.settings-section,
+.settings-row {
+  display: grid;
+  gap: var(--iro-space-3);
+}
+
+.settings-row {
+  gap: var(--iro-space-1);
+}
+
+/* A switch's label is only as wide as its toggle and text, so the empty row beside it doesn't toggle it. */
+.settings .iro-switch-label {
+  justify-self: start;
+}
+
+/* Fixed columns, so a lone field keeps a field's width instead of stretching across the card. */
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 5), 1fr));
+  gap: var(--iro-space-4);
+}
+
+/* Buttons in a row, wrapping on a narrow window. */
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-2);
+}
+
+/* Switches and checkboxes side by side, wrapping on a narrow window. */
+.settings-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-2) var(--iro-space-5);
+}
+
+/* A view's name over its starting values. */
+.settings-group {
+  margin: var(--iro-space-2) 0 0;
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+  font-weight: 600;
+}
+
+.settings-hint {
+  margin: 0;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* ── Updates ───────────────────────────── */
+/* Where updates stand, the download's bar while it runs, then Check now and Update and restart. */
+.settings-update {
+  display: grid;
+  gap: var(--iro-space-2);
+}
+
+.settings-update-line {
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+}
+
+.settings-update-line[data-tone="danger"] {
+  color: var(--iro-danger);
+}
+
+.settings-update-actions {
+  display: flex;
+  gap: var(--iro-space-2);
+}
+
+/* ── Signed-in sites ───────────────────── */
+.sites {
+  display: grid;
+  gap: var(--iro-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The site, then how many cookies and when, then Forget at the right. */
+.site-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--iro-space-3);
+  align-items: center;
+  font-size: var(--iro-text-sm);
+}
+
+.site-name {
+  font-weight: 600;
+}
+
+.site-detail {
+  color: var(--iro-fg-3);
+}

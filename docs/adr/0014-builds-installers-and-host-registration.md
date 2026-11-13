@@ -1,6 +1,8 @@
 # ADR-0014: Builds, installers and connecting the browsers
 
-**Status:** Accepted
+**Status:** Accepted; the portable Windows build is gone and releases carry signed update files:
+[ADR-0037](0037-updates-from-github-releases.md); the app fetches the extension for its version from the release:
+[ADR-0040](0040-extension-files-from-the-release.md)
 **Date:** 2026-11-10
 **Supersedes:** ADR-0006's "the installers register the host"
 

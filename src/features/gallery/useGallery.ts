@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useViewActive } from "../../app/viewShown";
 import { galleryPage, onLibraryChanged } from "../../lib/backend";
+import type { GalleryFolder } from "../../lib/types/GalleryFolder";
 import type { GalleryItem } from "../../lib/types/GalleryItem";
 import type { GallerySort } from "../../lib/types/GallerySort";
 
@@ -16,13 +17,19 @@ const MAX_REFRESH = 1000;
 // ── Types ─────────────────────────────────
 export interface GalleryFilter {
   kind: string | null;
-  site: string | null;
+  folder: string | null;
   search: string;
   sort: GallerySort;
 }
 
 // ── State ─────────────────────────────────
-let last: { key: string; items: GalleryItem[]; total: number; kinds: string[]; sites: string[] } | null = null;
+let last: {
+  key: string;
+  items: GalleryItem[];
+  total: number;
+  kinds: string[];
+  folders: GalleryFolder[];
+} | null = null;
 
 // ── Public API ────────────────────────────
 /** The files so far, how many match in all (`null` before the first page), and loading more. */
@@ -32,9 +39,11 @@ export function useGallery(filter: GalleryFilter) {
   const [items, setItems] = useState<GalleryItem[]>(kept?.items ?? []);
   const [total, setTotal] = useState<number | null>(kept?.total ?? null);
   const [kinds, setKinds] = useState<string[]>(kept?.kinds ?? []);
-  const [sites, setSites] = useState<string[]>(kept?.sites ?? []);
+  const [folders, setFolders] = useState<GalleryFolder[]>(kept?.folders ?? []);
   const shown = useRef(items.length);
   shown.current = items.length;
+  // The filter whose files are showing; it changes once a new filter's first page arrives.
+  const [shownFilter, setShownFilter] = useState<GalleryFilter | null>(kept ? filter : null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Answers to an older filter arrive late; only the newest one counts.
@@ -50,12 +59,13 @@ export function useGallery(filter: GalleryFilter) {
         if (mine !== ticket.current) return;
         setItems((all) => {
           const fresh = offset === 0 ? page.items : [...all, ...page.items];
-          last = { key, items: fresh, total: page.total, kinds: page.kinds, sites: page.sites };
+          last = { key, items: fresh, total: page.total, kinds: page.kinds, folders: page.folders };
           return fresh;
         });
+        if (offset === 0) setShownFilter(JSON.parse(key) as GalleryFilter);
         setTotal(page.total);
         setKinds(page.kinds);
-        setSites(page.sites);
+        setFolders(page.folders);
       } catch (e) {
         if (mine === ticket.current) setError(String(e));
       } finally {
@@ -94,5 +104,5 @@ export function useGallery(filter: GalleryFilter) {
 
   const reload = useCallback(() => void load(0), [load]);
 
-  return { items, total, kinds, sites, loading, error, loadMore, reload };
+  return { items, shownFilter, total, kinds, folders, loading, error, loadMore, reload };
 }

@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use super::manifest::{self, Archive, Tool};
-use crate::app::USER_AGENT;
+use crate::net;
 use crate::jobs::{Job, JobPhase};
 
 // ── Constants ─────────────────────────────
@@ -26,7 +26,7 @@ pub(super) fn program_file(program: &str) -> String {
 /// Downloads `url` to `file`, reporting progress, and returns the file's SHA-256 in lowercase hex.
 async fn fetch(url: &str, file: &Path, job: &Job) -> Result<String, String> {
     let failed = |e: reqwest::Error| format!("Download failed: {e}");
-    let client = reqwest::Client::builder().user_agent(USER_AGENT).build().map_err(failed)?;
+    let client = net::client().build().map_err(failed)?;
     let mut response = client.get(url).send().await.and_then(|r| r.error_for_status()).map_err(failed)?;
     let total = response.content_length();
     let mut out = tokio::fs::File::create(file).await.map_err(|e| format!("Can't save the download: {e}"))?;

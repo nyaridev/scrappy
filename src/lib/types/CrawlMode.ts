@@ -3,4 +3,4 @@
 /**
  * What a crawl keeps.
  */
-export type CrawlMode = "files" | "mirror" | "page";
+export type CrawlMode = "mirror" | "page";

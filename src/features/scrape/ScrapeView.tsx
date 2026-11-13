@@ -1,55 +1,28 @@
-// ScrapeView: crawl a site for its files, mirror it, or save one page: the link, what to keep, the limits (depth,
-// pages, files, delay, smallest size), start and stop, live counts, the folder it went to, and opening the result.
+// ScrapeView: save a whole site to read offline, or one page with everything it needs (ADR-0008); a site's files are
+// Grab's (ADR-0031). The mode as tabs on top, the site, a mirror's limits (depth, pages, delay in seconds), start and
+// stop, live counts, the folder it went to, opening the result, and a mirror's images and videos to pick from as it
+// crawls (`MirrorPicks`, ADR-0033).
 
-import {
-  Button,
-  Field,
-  Icon,
-  IconButton,
-  MultiSegmented,
-  NumberField,
-  Panel,
-  ProgressBar,
-  Segmented,
-  TextField,
-  toast,
-} from "iro-ui";
-import {
-  AudioBarsIcon,
-  ExternalLinkIcon,
-  FileIcon,
-  GlobeIcon,
-  ImageIcon,
-  LinkIcon,
-  PlayIcon,
-  SaveIcon,
-  StopIcon,
-} from "iro-ui/icons";
-import { type ReactNode, useState } from "react";
+import { Button, Field, Icon, IconButton, NumberField, Panel, ProgressBar, Tabs, TextField, toast } from "iro-ui";
+import { ExternalLinkIcon, GlobeIcon, LinkIcon, SaveIcon } from "iro-ui/icons";
+import { useState } from "react";
+import { useSettings } from "../../app/SettingsProvider";
 import { ShowInFolderButton } from "../../components/ShowInFolderButton";
+import { StopButton } from "../../components/StopButton";
 import { openFile } from "../../lib/backend";
 import { formatCount } from "../../lib/format";
 import type { CrawlMode } from "../../lib/types/CrawlMode";
-import type { FindKind } from "../../lib/types/FindKind";
+import { MirrorPicks } from "./MirrorPicks";
 import { useCrawl } from "./useCrawl";
 
 // ── Constants ─────────────────────────────
-const KINDS: { value: FindKind; label: string; icon: ReactNode }[] = [
-  { value: "image", label: "Images", icon: <Icon icon={ImageIcon} /> },
-  { value: "video", label: "Videos", icon: <Icon icon={PlayIcon} /> },
-  { value: "audio", label: "Audio", icon: <Icon icon={AudioBarsIcon} /> },
-  { value: "other", label: "Files", icon: <Icon icon={FileIcon} /> },
-];
-
-const MODES: { value: CrawlMode; label: string }[] = [
-  { value: "files", label: "Files" },
-  { value: "mirror", label: "Mirror site" },
-  { value: "page", label: "Save page" },
-];
+const MODES = [
+  { value: "mirror", label: "Mirror site", icon: GlobeIcon },
+  { value: "page", label: "Save page", icon: SaveIcon },
+] as const;
 
 /** Per mode: the start button and the running state. */
 const WORDS: Record<CrawlMode, { start: string; running: string }> = {
-  files: { start: "Crawl", running: "Crawling" },
   mirror: { start: "Mirror", running: "Mirroring" },
   page: { start: "Save", running: "Saving" },
 };
@@ -58,9 +31,7 @@ const WORDS: Record<CrawlMode, { start: string; running: string }> = {
 interface Limits {
   depth: number;
   pages: number;
-  files: number;
   delayMs: number;
-  minKb: number;
 }
 
 // ── Public API ────────────────────────────
@@ -68,10 +39,15 @@ interface Limits {
 export function ScrapeView() {
   const { crawl, start, stop } = useCrawl();
   const [link, setLink] = useState("");
-  const [mode, setMode] = useState<CrawlMode>("files");
-  const [kinds, setKinds] = useState<FindKind[]>(["image"]);
-  const [limits, setLimits] = useState<Limits>({ depth: 2, pages: 100, files: 200, delayMs: 500, minKb: 10 });
+  const [mode, setMode] = useState<CrawlMode>("mirror");
+  const starts = useSettings().settings?.preferences?.starts.scrape;
+  const [limits, setLimits] = useState<Limits>(() => ({
+    depth: starts?.depth ?? 2,
+    pages: starts?.pages ?? 100,
+    delayMs: starts?.delayMs ?? 500,
+  }));
   const running = crawl.state === "running";
+  const ready = link.trim() !== "";
   const progress = crawl.state === "failed" || crawl.state === "idle" ? null : crawl.progress;
 
   const limit = (key: keyof Limits, label: string, min: number, max: number, step = 1) => (
@@ -88,8 +64,8 @@ export function ScrapeView() {
   );
 
   const run = () => {
-    if (!link.trim() || running) return;
-    void start({ url: link.trim(), mode, kinds, ...limits });
+    if (!ready || running) return;
+    void start({ url: link.trim(), mode, ...limits });
   };
 
   const open = (path: string) =>
@@ -102,19 +78,25 @@ export function ScrapeView() {
     const state = crawl.state === "done" ? "Done" : crawl.state === "stopped" ? "Stopped" : WORDS[crawl.mode].running;
     if (crawl.mode === "page") return state;
     if (!progress) return `${state} · starting`;
-    return `${state} · ${progress.message ?? "0 pages"} · ${formatCount(progress.done, "file")} saved`;
+    return `${state} · ${progress.message ?? "0 pages"} · ${formatCount(progress.done, "file")}`;
   };
 
   return (
     <div className="scrape">
       <Panel as="section" className="scrape-card" aria-label="Crawl a site">
-        <Segmented
-          size="sm"
+        <Tabs
+          variant="pill"
+          className="fill-tabs"
           aria-label="Mode"
-          options={MODES}
+          tabs={MODES.map(({ value, label, icon }) => ({
+            value,
+            label,
+            icon: <Icon icon={icon} />,
+            // The mode can't change under a running crawl.
+            disabled: running && value !== mode,
+          }))}
           value={mode}
           onValueChange={setMode}
-          disabled={running}
         />
         <Field label="Site" error={crawl.state === "failed" ? crawl.message : undefined}>
           <TextField
@@ -128,37 +110,31 @@ export function ScrapeView() {
             start={<Icon icon={LinkIcon} />}
           />
         </Field>
-        {mode === "files" && (
-          <Field label="Keep">
-            <MultiSegmented
-              size="sm"
-              aria-label="Kinds of files"
-              options={KINDS}
-              value={kinds}
-              disabled={running}
-              onValueChange={(next) => next.length > 0 && setKinds(next)}
-            />
-          </Field>
-        )}
-        {mode !== "page" && (
+        {mode === "mirror" && (
           <div className="scrape-limits">
             {limit("depth", "Depth", 1, 10)}
             {limit("pages", "Pages", 1, 10_000, 10)}
-            {limit("files", "Files", 1, 10_000, 10)}
-            {limit("delayMs", "Delay (ms)", 0, 60_000, 100)}
-            {mode === "files" && limit("minKb", "Smallest (KB)", 0, 100_000, 5)}
+            <Field label="Delay (s)">
+              <NumberField
+                value={limits.delayMs / 1000}
+                min={0}
+                max={60}
+                step={0.1}
+                format={{ maximumFractionDigits: 1 }}
+                disabled={running}
+                onValueChange={(value) => setLimits((all) => ({ ...all, delayMs: Math.round((value ?? 0) * 1000) }))}
+              />
+            </Field>
           </div>
         )}
         <div className="scrape-actions">
           {running ? (
-            <Button icon={<Icon icon={StopIcon} />} onClick={stop}>
-              Stop
-            </Button>
+            <StopButton onStop={stop} />
           ) : (
             <Button
               variant="primary"
               icon={<Icon icon={mode === "page" ? SaveIcon : GlobeIcon} />}
-              disabled={!link.trim()}
+              disabled={!ready}
               onClick={run}
             >
               {WORDS[mode].start}
@@ -169,12 +145,7 @@ export function ScrapeView() {
 
       {crawl.state !== "idle" && crawl.state !== "failed" && (
         <Panel as="section" className="scrape-status" aria-label="Crawl">
-          {running && (
-            <ProgressBar
-              label={crawl.mode === "page" ? "Saving" : "Files saved"}
-              value={crawl.mode !== "page" && progress?.total ? progress.done / progress.total : null}
-            />
-          )}
+          {running && <ProgressBar label={crawl.mode === "page" ? "Saving" : "Mirroring"} value={null} />}
           <div className="scrape-counts">
             <span>{counts()}</span>
             <span className="scrape-folder selectable">{crawl.open ?? crawl.folder}</span>
@@ -189,6 +160,10 @@ export function ScrapeView() {
             )}
           </div>
         </Panel>
+      )}
+
+      {crawl.state !== "idle" && crawl.state !== "failed" && crawl.mode === "mirror" && (
+        <MirrorPicks site={crawl.site} crawling={running} />
       )}
     </div>
   );

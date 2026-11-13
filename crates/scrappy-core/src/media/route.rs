@@ -1,5 +1,6 @@
 //! Route: which tool takes a link. Sites gallery-dl knows best (posts, profiles, image galleries) go to it; every other
-//! link goes to yt-dlp, which handles videos, playlists and channels. A new site is one entry in `GALLERY_SITES`.
+//! link goes to yt-dlp, which handles videos, playlists and channels. A new site is one entry in `GALLERY_SITES`. A
+//! single post on a site in `VIDEO_FIRST` asks yt-dlp first, for its video's qualities, then gallery-dl.
 
 // ── Imports ───────────────────────────────
 use reqwest::Url;
@@ -20,6 +21,10 @@ const GALLERY_SITES: &[(&str, Option<&str>)] = &[
     ("facebook.com", Some("/photo")),
 ];
 
+/// Sites whose single posts go to yt-dlp first (a video, with its qualities) and to gallery-dl when yt-dlp finds no
+/// video (images): the site, and the path part a post's link has.
+const VIDEO_FIRST: &[(&str, &str)] = &[("x.com", "/status/")];
+
 /// Sites that answer "not found" instead of "sign in" to a visitor who isn't signed in.
 const HIDDEN_WITHOUT_SIGN_IN: &[&str] = &["instagram.com", "x.com", "facebook.com"];
 
@@ -29,12 +34,17 @@ const HIDDEN_WITHOUT_SIGN_IN: &[&str] = &["instagram.com", "x.com", "facebook.co
 pub(super) enum Engine {
     YtDlp,
     GalleryDl,
+    /// yt-dlp, else gallery-dl.
+    YtDlpThenGalleryDl,
 }
 
 // ── Public API ────────────────────────────
 /// The tool for `url` (already checked as a web link).
 pub(super) fn route(url: &str) -> Engine {
     let (Some(site), Ok(parsed)) = (vault::site_of(url), Url::parse(url)) else { return Engine::YtDlp };
+    if VIDEO_FIRST.iter().any(|(name, part)| *name == site && parsed.path().contains(part)) {
+        return Engine::YtDlpThenGalleryDl;
+    }
     let gallery = GALLERY_SITES
         .iter()
         .any(|(name, path)| *name == site && path.is_none_or(|part| parsed.path().contains(part)));
@@ -53,7 +63,8 @@ mod tests {
     #[test]
     fn sends_social_links_to_gallery_dl() {
         assert_eq!(route("https://x.com/NASA/media"), Engine::GalleryDl);
-        assert_eq!(route("https://twitter.com/NASA/status/1"), Engine::GalleryDl);
+        assert_eq!(route("https://twitter.com/NASA/status/1"), Engine::YtDlpThenGalleryDl);
+        assert_eq!(route("https://x.com/NASA/status/1/photo/1"), Engine::YtDlpThenGalleryDl);
         assert_eq!(route("https://www.instagram.com/nasa/"), Engine::GalleryDl);
         assert_eq!(route("https://bsky.app/profile/bsky.app"), Engine::GalleryDl);
         assert_eq!(route("https://someone.tumblr.com/post/1"), Engine::GalleryDl);

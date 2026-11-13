@@ -53,7 +53,8 @@ pub(super) fn older_than(version: &str, pinned: &str) -> Option<bool> {
 pub fn command(program: &Path) -> Command {
     let mut command = Command::new(program);
     command.stdin(Stdio::null()).kill_on_drop(true);
-    // yt-dlp and gallery-dl are Python programs: make them print UTF-8, which is how their output is read.
+    // yt-dlp and gallery-dl are Python programs: UTF-8 for what they read and write. Their printing ignores this
+    // on Windows; `media::engine` gives each its own flag for that.
     command.env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8");
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);

@@ -1,0 +1,5 @@
+# Space: NASA and ESA image archives, telescopes, encyclopedias.
+name = "Space"
+group = "Science and history"
+web = false
+sites = ["nasa.gov", "esawebb.org", "esahubble.org", "esa.int", "flickr.com", "commons.wikimedia.org", "wikipedia.org"]

@@ -3,6 +3,7 @@
 // it's noted as the view hides and put back when it shows.
 
 import { type ComponentType, memo, useLayoutEffect, useMemo, useRef } from "react";
+import { ViewError } from "./ViewError";
 import { ViewActive, ViewShown } from "./viewShown";
 
 /** The view's page, with whether it shows and how many times it has. */
@@ -34,7 +35,9 @@ export const KeptView = memo(function KeptView({
   return (
     <main ref={main} className="view" aria-label={label} hidden={!active}>
       <ViewActive.Provider value={active}>
-        <ViewShown.Provider value={shown}>{page}</ViewShown.Provider>
+        <ViewShown.Provider value={shown}>
+          <ViewError>{page}</ViewError>
+        </ViewShown.Provider>
       </ViewActive.Provider>
     </main>
   );

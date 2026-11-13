@@ -1,0 +1,5 @@
+# Movies and TV: film databases, stills, wikis and communities.
+name = "Movies and TV"
+group = "Entertainment"
+web = false
+sites = ["imdb.com", "film-grab.com", "fandom.com", "wikipedia.org", "reddit.com"]

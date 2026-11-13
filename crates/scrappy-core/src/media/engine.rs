@@ -1,10 +1,12 @@
 //! Engine: the check every link goes through, the yt-dlp and gallery-dl commands every run starts from (yt-dlp with
-//! Scrappy's Deno and FFmpeg passed in, both with the speed limit), running a tool line by line until it ends or is
-//! stopped, sign-in walls, and tool errors turned into one readable line.
+//! Scrappy's Deno and FFmpeg passed in, both with the speed limit and the proxy), what yt-dlp saves besides the video
+//! and where a single download goes (ADR-0034), running a tool line by line until it ends or is stopped, sign-in
+//! walls, and tool errors turned into one readable line.
 
 // ── Imports ───────────────────────────────
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{PoisonError, RwLock};
 use std::time::Duration;
 
 use reqwest::Url;
@@ -12,6 +14,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::jobs::Job;
+use crate::net;
+use crate::settings::MediaOptions;
 use crate::tools::{self, Tool, Toolbox};
 use crate::vault::CookieFile;
 
@@ -41,11 +45,52 @@ const LOGIN_HINTS: &[&str] = &[
 // ── State ─────────────────────────────────
 /// Each download's top speed in bytes per second, 0 for none: a setting for the whole app (ADR-0017).
 static SPEED_LIMIT: AtomicU64 = AtomicU64::new(0);
+/// What yt-dlp saves besides the video, and where a single download goes (ADR-0034); `None` for the defaults.
+static OPTIONS: RwLock<Option<MediaOptions>> = RwLock::new(None);
+
+// ── Private helpers ───────────────────────
+/// The media preferences now in force.
+pub(super) fn options() -> MediaOptions {
+    OPTIONS.read().unwrap_or_else(PoisonError::into_inner).clone().unwrap_or_default()
+}
+
+/// One printed line as text. A byte that isn't UTF-8 becomes `�` instead of ending the reading, which would lose
+/// every line after it.
+fn text(line: &[u8]) -> String {
+    String::from_utf8_lossy(line).trim_end_matches('\r').to_string()
+}
 
 // ── Public API ────────────────────────────
 /// Caps each download that starts from now on at `bytes` per second; `None` for no limit.
 pub fn set_speed_limit(bytes: Option<u64>) {
     SPEED_LIMIT.store(bytes.unwrap_or(0), Ordering::Relaxed);
+}
+
+/// Uses `options` (checked) for the downloads that start from now on.
+pub fn set_media_options(options: MediaOptions) {
+    *OPTIONS.write().unwrap_or_else(PoisonError::into_inner) = Some(options);
+}
+
+/// Adds what the user wants saved besides the file: subtitles (not for audio), metadata, the thumbnail and chapters.
+pub(super) fn add_extras(command: &mut Command, audio: bool) {
+    let options = options();
+    if options.subtitles && !audio {
+        command.args(["--write-subs", "--embed-subs", "--sub-langs", &options.subtitle_languages]);
+        if options.auto_subtitles {
+            command.arg("--write-auto-subs");
+        }
+    }
+    let flags = [
+        (options.embed_metadata, "--embed-metadata"),
+        (options.embed_thumbnail, "--embed-thumbnail"),
+        (options.embed_chapters, "--embed-chapters"),
+    ];
+    command.args(flags.into_iter().filter(|(on, _)| *on).map(|(_, flag)| flag));
+}
+
+/// A single download's place in the library as a template: in `Audio/` or `Videos/`, named as the user set.
+pub(super) fn place_template(audio: bool) -> String {
+    format!("{}/{}", if audio { "Audio" } else { "Videos" }, options().name_template)
 }
 
 /// The speed limit in bytes per second, if there is one.
@@ -66,9 +111,13 @@ pub(super) fn check_url(input: &str) -> Result<String, String> {
 pub(super) fn yt_dlp(toolbox: &Toolbox) -> Result<Command, String> {
     let program = toolbox.locate(Tool::YtDlp).1.ok_or("yt-dlp isn't installed. Download it in Settings.")?;
     let mut command = tools::command(&program);
-    command.args(["--no-colors", "--no-warnings", "--no-playlist"]);
+    // On Windows it prints in the system code page otherwise, and a title's `ż` or `｜` breaks the saved path.
+    command.args(["--encoding", "utf-8", "--no-colors", "--no-warnings", "--no-playlist"]);
     if let Some(bytes) = speed_limit() {
         command.arg("--limit-rate").arg(bytes.to_string());
+    }
+    if let Some(proxy) = net::proxy() {
+        command.arg("--proxy").arg(proxy);
     }
     if let Some(deno) = toolbox.locate(Tool::Deno).1 {
         command.arg("--js-runtimes").arg(format!("deno:{}", deno.display()));
@@ -83,9 +132,13 @@ pub(super) fn yt_dlp(toolbox: &Toolbox) -> Result<Command, String> {
 pub(super) fn gallery_dl(toolbox: &Toolbox) -> Result<Command, String> {
     let program = toolbox.locate(Tool::GalleryDl).1.ok_or("gallery-dl isn't installed. Download it in Settings.")?;
     let mut command = tools::command(&program);
-    command.arg("--config-ignore");
+    // UTF-8 output, as with yt-dlp: it ignores Python's own UTF-8 settings.
+    command.args(["--config-ignore", "-o", "output.stdout=utf-8"]);
     if let Some(bytes) = speed_limit() {
         command.arg("--limit-rate").arg(bytes.to_string());
+    }
+    if let Some(proxy) = net::proxy() {
+        command.arg("--proxy").arg(proxy);
     }
     Ok(command)
 }
@@ -102,19 +155,19 @@ pub(super) async fn run_lines(
     let mut child = command.spawn().map_err(|e| format!("{name} didn't start: {e}"))?;
     let stderr = child.stderr.take().map(|stderr| {
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
+            let mut lines = BufReader::new(stderr).split(b'\n');
             let mut kept = Vec::new();
-            while let Ok(Some(line)) = lines.next_line().await {
-                kept.push(line);
+            while let Ok(Some(line)) = lines.next_segment().await {
+                kept.push(text(&line));
             }
             kept
         })
     });
-    let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| format!("{name} gave no output."))?).lines();
+    let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| format!("{name} gave no output."))?).split(b'\n');
     let stopped = loop {
         tokio::select! {
-            line = lines.next_line() => match line {
-                Ok(Some(line)) => on_line(&line),
+            line = lines.next_segment() => match line {
+                Ok(Some(line)) => on_line(&text(&line)),
                 _ => break false,
             },
             () = tokio::time::sleep(CANCEL_CHECK) => if job.cancelled() { break true },
@@ -175,7 +228,12 @@ pub(super) fn error_text(lines: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_url, error_text, needs_login};
+    use super::{check_url, error_text, needs_login, text};
+
+    #[test]
+    fn reads_a_line_that_isnt_utf8() {
+        assert_eq!(text(b"Za\x96 \xc5\xbc\r"), "Za\u{fffd} \u{17c}");
+    }
 
     #[test]
     fn takes_only_web_links() {

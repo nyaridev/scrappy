@@ -1,11 +1,12 @@
 // BrowserExtension: the Settings section that connects the browsers to this app, so the Scrappy extension reaches
-// it, and shows which ones are connected.
+// it, and shows which ones are connected; and the extension itself for this version, downloaded from its release
+// and opened in the file manager for the user to load unpacked (ADR-0040).
 
-import { Button, Icon, PropertyList, SectionTitle, toast } from "iro-ui";
-import { PuzzleIcon } from "iro-ui/icons";
+import { Button, Icon, Panel, PropertyList, SectionTitle, toast } from "iro-ui";
+import { DownloadIcon, FolderOpenIcon, PuzzleIcon } from "iro-ui/icons";
 import { useEffect, useState } from "react";
 import { useViewShown } from "../../app/viewShown";
-import { connectBrowsers, disconnectBrowsers, hostStatus } from "../../lib/backend";
+import { connectBrowsers, disconnectBrowsers, extensionFiles, hostStatus, openExtensionFiles } from "../../lib/backend";
 import type { HostStatus } from "../../lib/types/HostStatus";
 
 // ── Public API ────────────────────────────
@@ -13,6 +14,8 @@ import type { HostStatus } from "../../lib/types/HostStatus";
 export function BrowserExtension() {
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
   const shown = useViewShown();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is there to check again when Settings shows
@@ -20,7 +23,19 @@ export function BrowserExtension() {
     hostStatus()
       .then(setStatus)
       .catch(() => {});
+    extensionFiles()
+      .then(setFiles)
+      .catch(() => {});
   }, [shown]);
+
+  /** Downloads the extension when it isn't there yet, then opens its folder. */
+  const getFiles = () => {
+    setFetching(true);
+    openExtensionFiles()
+      .then(setFiles)
+      .catch((error) => toast({ tone: "error", title: "Couldn't get the extension", description: String(error) }))
+      .finally(() => setFetching(false));
+  };
 
   const run = (action: () => Promise<HostStatus>, failed: string) => {
     setBusy(true);
@@ -32,7 +47,7 @@ export function BrowserExtension() {
 
   const connected = status?.connected ?? [];
   return (
-    <section className="settings-section">
+    <Panel as="section" className="settings-section">
       <SectionTitle
         icon={<Icon icon={PuzzleIcon} />}
         actions={
@@ -65,8 +80,28 @@ export function BrowserExtension() {
           : "Lets the Scrappy extension in Chrome, Brave, Edge, Chromium and Firefox reach this app."}
       </p>
       <PropertyList
-        properties={[{ label: "Connected", value: connected.length > 0 ? connected.join(", ") : "None" }]}
+        copyLabel="Copy"
+        properties={[
+          { label: "Connected", value: connected.length > 0 ? connected.join(", ") : "None" },
+          ...(files ? [{ label: "Extension files", value: files, mono: true, copy: files }] : []),
+        ]}
       />
-    </section>
+      <div className="settings-row">
+        <div className="settings-actions">
+          <Button
+            size="sm"
+            icon={<Icon icon={files ? FolderOpenIcon : DownloadIcon} />}
+            loading={fetching}
+            onClick={getFiles}
+          >
+            {files ? "Open extension folder" : "Download extension"}
+          </Button>
+        </div>
+        <p className="settings-hint">
+          In Chrome, Brave or Edge: open the extensions page, turn on Developer mode, then Load unpacked and pick this
+          folder.
+        </p>
+      </div>
+    </Panel>
   );
 }

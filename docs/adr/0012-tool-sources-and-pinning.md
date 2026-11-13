@@ -1,6 +1,7 @@
 # ADR-0012: Tool sources and pinning
 
-**Status:** Accepted; replaces the "Sources" bullet of ADR-0002 and says when ADR-0002's checksums are checked
+**Status:** Accepted; replaces the "Sources" bullet of ADR-0002 and says when ADR-0002's checksums are checked;
+yt-dlp's update at start can be turned off (ADR-0034)
 **Date:** 2026-11-10
 
 ## Context

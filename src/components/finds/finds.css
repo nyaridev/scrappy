@@ -1,0 +1,253 @@
+/* Finds: the toolbars over a list of finds, and the finds as a list of rows or a grid of tiles (Grab, Scrape). */
+
+/* A panel of finds: its head (a title, live facts, and a Stop button at the right), then `FindResults`. */
+.finds-panel {
+  display: grid;
+  gap: var(--iro-space-4);
+}
+
+.finds-head {
+  display: flex;
+  gap: var(--iro-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.finds-heading {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+}
+
+.finds-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finds-facts {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* Type filters (or Select all) on the left; sort and layout (or the view's actions) on the right; they wrap on a
+   narrow window. */
+.finds-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.finds-controls {
+  display: flex;
+  gap: var(--iro-space-2);
+  align-items: center;
+}
+
+/* The view's actions keep to the right even when the row wraps. */
+.finds-actions {
+  gap: var(--iro-space-4);
+  margin-left: auto;
+}
+
+.find-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Thumbnail box ─────────────────────── */
+/* A 16:9 box the thumbnail fits in whole, loaded or not, on a dark well that edges a tall or wide one; badges are laid
+   over it: type and pick mark at the top, the download's state at the bottom. */
+.find-box {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--iro-radius-md);
+  overflow: hidden;
+  background: var(--iro-sunken);
+}
+
+/* The frame's 16:9 grows to fit a tall picture; pinned to the box, the picture shrinks to fit it instead. */
+.find-box .iro-image-frame {
+  height: 100%;
+  border-radius: 0;
+}
+
+.find-box .iro-image-img {
+  position: absolute;
+  inset: 0;
+}
+
+.find-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.find-thumb.find-thumb-empty {
+  display: grid;
+  place-items: center;
+  color: var(--iro-fg-3);
+}
+
+.find-state {
+  position: absolute;
+  bottom: var(--iro-space-1);
+  left: var(--iro-space-1);
+}
+
+.find-progress {
+  position: absolute;
+  right: var(--iro-space-1);
+  bottom: var(--iro-space-1);
+  left: var(--iro-space-1);
+}
+
+.find-check {
+  position: absolute;
+  top: var(--iro-space-2);
+  right: var(--iro-space-2);
+  border-radius: 50%;
+  background: var(--iro-surface);
+  color: var(--iro-accent);
+}
+
+/* ── Grid ──────────────────────────────── */
+.find-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 7), 1fr));
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The whole tile picks: the box, then one line of name and one of size, so every tile is the same height. */
+.find-tile-pick {
+  display: grid;
+  gap: var(--iro-space-1);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.find-tile-pick:focus-visible {
+  outline: none;
+}
+
+.find-tile-pick:focus-visible .find-box,
+.find-tile[data-selected] .find-box {
+  outline: calc(var(--iro-space-1) / 2) solid var(--iro-accent);
+  outline-offset: calc(var(--iro-space-1) / 2);
+}
+
+.find-tile-pick:focus-visible .find-box {
+  outline-color: var(--iro-focus);
+}
+
+.find-tile-kind {
+  position: absolute;
+  top: var(--iro-space-2);
+  left: var(--iro-space-2);
+}
+
+.find-tile-text {
+  display: grid;
+  min-width: 0;
+}
+
+.find-tile-name {
+  font-size: var(--iro-text-sm);
+  font-weight: 600;
+}
+
+.find-tile-facts {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-xs);
+}
+
+/* ── List ──────────────────────────────── */
+.find-list {
+  display: grid;
+  gap: var(--iro-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The whole row picks: pick mark, thumbnail, type, name, size. */
+.find-row-pick {
+  display: grid;
+  grid-template-columns:
+    var(--iro-space-5) calc(var(--iro-space-6) * 4) calc(var(--iro-space-6) * 4) minmax(0, 1fr)
+    calc(var(--iro-space-6) * 3);
+  gap: var(--iro-space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--iro-space-1) var(--iro-space-2);
+  border: 0;
+  border-radius: var(--iro-radius-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.find-row-pick:hover {
+  background: var(--iro-surface-2);
+}
+
+.find-row[data-selected] .find-row-pick {
+  background: var(--iro-surface-3);
+}
+
+.find-row-pick:focus-visible {
+  outline: calc(var(--iro-space-1) / 2) solid var(--iro-focus);
+}
+
+/* An empty ring until picked, then the check. */
+.find-row-mark {
+  display: grid;
+  place-items: center;
+  width: var(--iro-space-5);
+  height: var(--iro-space-5);
+  color: var(--iro-accent);
+}
+
+.find-row-mark:empty::before {
+  content: "";
+  width: calc(var(--iro-space-4) - var(--iro-space-1));
+  height: calc(var(--iro-space-4) - var(--iro-space-1));
+  border: calc(var(--iro-space-1) / 4) solid var(--iro-fg-3);
+  border-radius: 50%;
+}
+
+.find-row-kind {
+  justify-self: start;
+}
+
+.find-row-box {
+  border-radius: var(--iro-radius-sm);
+}
+
+.find-row-size {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+  text-align: end;
+}

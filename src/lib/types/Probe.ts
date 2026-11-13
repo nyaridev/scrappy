@@ -41,4 +41,8 @@ sections: Array<Section>,
 /**
  * A playlist's videos as listed (up to 1000); empty for a channel (its sections have them) and for one video.
  */
-entries: Array<ListEntry>, };
+entries: Array<ListEntry>, 
+/**
+ * For a list read from one of its videos (`watch?v=…&list=…`, a Mix too): that video's own link.
+ */
+video: string | null, };

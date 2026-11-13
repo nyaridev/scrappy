@@ -13,7 +13,7 @@ use reqwest::{Client, Url};
 /// DuckDuckGo's plain HTML search page.
 pub const ENGINE: &str = "https://html.duckduckgo.com/html/";
 /// Between two requests to DuckDuckGo.
-const DELAY: Duration = Duration::from_millis(1500);
+pub(super) const DELAY: Duration = Duration::from_millis(1500);
 /// The most pages of results one search reads.
 const MAX_RESULT_PAGES: usize = 10;
 const REFUSED: &str = "DuckDuckGo didn't answer the search. Try again in a while.";

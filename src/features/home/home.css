@@ -1,0 +1,79 @@
+/* The Home view: the library card (totals over the per-day chart), the recent tiles, then types beside sites. The
+   tiles' styles are in `src/styles.css`, shared with the Gallery. */
+
+/* ── Home ──────────────────────────────── */
+.home {
+  display: grid;
+  gap: var(--iro-space-6);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 30));
+}
+
+/* ── Library card ──────────────────────── */
+.home-card {
+  display: grid;
+  gap: var(--iro-space-5);
+}
+
+/* Four totals in two pairs: a row of four, or the pairs stacked when the window is narrow (never three and one). */
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 9), 1fr));
+  gap: var(--iro-space-4);
+}
+
+.home-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--iro-space-4);
+}
+
+.home-days {
+  display: grid;
+  gap: var(--iro-space-3);
+  padding-top: var(--iro-space-5);
+  border-top: 1px solid var(--iro-line);
+}
+
+/* A section's title at the left, its numbers or button at the right. */
+.home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--iro-space-3);
+}
+
+.home-facts {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* ── Recent ────────────────────────────── */
+.home-recent {
+  display: grid;
+  gap: var(--iro-space-3);
+}
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── Types and sites ───────────────────── */
+.home-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 12), 1fr));
+  gap: var(--iro-space-5);
+  align-items: stretch;
+}
+
+.home-section {
+  display: grid;
+  gap: var(--iro-space-3);
+  align-content: start;
+}

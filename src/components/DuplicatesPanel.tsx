@@ -2,11 +2,12 @@
 // scan the library or one folder, look through the groups (each one's best copy marked, the rest picked) and move the picked copies to the trash.
 
 import { AlertDialog, Button, EmptyState, Icon, IconButton, ProgressBar, Segmented, toast } from "iro-ui";
-import { ArrowLeftIcon, DuplicateIcon, StopIcon, TrashIcon } from "iro-ui/icons";
+import { ArrowLeftIcon, DuplicateIcon, TrashIcon } from "iro-ui/icons";
 import { useState } from "react";
 import { formatCount } from "../lib/format";
 import type { Strictness } from "../lib/types/Strictness";
 import { DuplicateGroup } from "./DuplicateGroup";
+import { StopButton } from "./StopButton";
 import { useDuplicates } from "./useDuplicates";
 
 // ── Constants ─────────────────────────────
@@ -19,11 +20,10 @@ const STRICTNESS: { value: Strictness; label: string }[] = [
 // ── Public API ────────────────────────────
 /** The panel, for the whole library or `folder`; `onClose` goes back, with `changed` when files moved to the trash. */
 export function DuplicatesPanel({ folder, onClose }: { folder?: string; onClose: (changed: boolean) => void }) {
-  const { scan, picked, start, stop, toggle, trashPicked } = useDuplicates(folder);
+  const { result, running, progress, picked, start, stop, toggle, trashPicked } = useDuplicates(folder);
   const [strictness, setStrictness] = useState<Strictness>("normal");
   const [asking, setAsking] = useState(false);
   const [changed, setChanged] = useState(false);
-  const progress = scan.state === "running" ? scan.progress : null;
   const copies = formatCount(picked.size, "file");
 
   async function moveToTrash() {
@@ -48,12 +48,10 @@ export function DuplicatesPanel({ folder, onClose }: { folder?: string; onClose:
           options={STRICTNESS}
           value={strictness}
           onValueChange={setStrictness}
-          disabled={scan.state === "running"}
+          disabled={running}
         />
-        {scan.state === "running" ? (
-          <Button icon={<Icon icon={StopIcon} />} onClick={stop}>
-            Stop
-          </Button>
+        {running ? (
+          <StopButton onStop={stop} />
         ) : (
           <Button variant="primary" icon={<Icon icon={DuplicateIcon} />} onClick={() => void start(strictness)}>
             Find duplicates
@@ -61,7 +59,7 @@ export function DuplicatesPanel({ folder, onClose }: { folder?: string; onClose:
         )}
       </div>
 
-      {scan.state === "running" && (
+      {running && (
         <div className="duplicates-progress">
           <ProgressBar label="Scan progress" value={progress?.total ? progress.done / progress.total : null} />
           <span className="duplicates-note">
@@ -70,19 +68,19 @@ export function DuplicatesPanel({ folder, onClose }: { folder?: string; onClose:
           </span>
         </div>
       )}
-      {scan.state === "failed" && (
+      {!running && result.state === "failed" && (
         <EmptyState tone="warning" title="The scan failed">
-          {scan.message}
+          {result.message}
         </EmptyState>
       )}
-      {scan.state === "done" && scan.groups.length === 0 && (
+      {!running && result.state === "done" && result.groups.length === 0 && (
         <EmptyState title={changed ? "No duplicates left" : "No duplicates found"} />
       )}
-      {scan.state === "done" && scan.groups.length > 0 && (
+      {!running && result.state === "done" && result.groups.length > 0 && (
         <>
           <div className="duplicates-summary">
             <span className="duplicates-note">
-              {formatCount(scan.groups.length, "group")} · {copies} picked
+              {formatCount(result.groups.length, "group")} · {copies} picked
             </span>
             <Button
               variant="danger"
@@ -94,7 +92,7 @@ export function DuplicatesPanel({ folder, onClose }: { folder?: string; onClose:
             </Button>
           </div>
           <div className="duplicates-groups">
-            {scan.groups.map((group) => (
+            {result.groups.map((group) => (
               <DuplicateGroup key={group[0]?.path} group={group} picked={picked} onPick={toggle} />
             ))}
           </div>

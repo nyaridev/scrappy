@@ -1,0 +1,413 @@
+/* The Download view: the link form, the link's card, a playlist's or channel's lists, the video picker and the
+   view's download list. */
+
+/* ── Download ──────────────────────────── */
+.download {
+  display: grid;
+  gap: var(--iro-space-5);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 22));
+}
+
+.download-card {
+  display: grid;
+  gap: var(--iro-space-5);
+}
+
+.download-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4);
+}
+
+.download-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--iro-space-4);
+}
+
+/* Stop and Just this video sit at the start of the row, away from Download. */
+.download-start {
+  display: flex;
+  align-items: center;
+  gap: var(--iro-space-2);
+  margin-inline-end: auto;
+}
+
+.download-size {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* ── Lists and the video picker ────────── */
+/* A playlist's or channel's lists: one card each, flush with the panel's other content: the thumbnails, then the
+   name and count with the switch on the same line. */
+.list-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 8), 1fr));
+  gap: var(--iro-space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-tile {
+  display: grid;
+  gap: var(--iro-space-3);
+  min-width: 0;
+}
+
+/* Two rows of two wide thumbnails, or one row of four tall ones, in the same 16:9 box. */
+.mosaic {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: var(--iro-space-1);
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--iro-radius-md);
+  background: none;
+  cursor: pointer;
+  transition:
+    opacity var(--iro-dur) var(--iro-ease),
+    filter var(--iro-dur) var(--iro-ease);
+}
+
+.mosaic[data-tall] {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr;
+}
+
+.mosaic:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.mosaic:focus-visible {
+  outline: 2px solid var(--iro-focus);
+  outline-offset: 2px;
+}
+
+.mosaic-cell {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--iro-surface-3);
+  color: var(--iro-fg-4);
+}
+
+.mosaic-cell img,
+.video-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.list-tile-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--iro-space-3);
+}
+
+.list-tile-text {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.list-tile-title {
+  font-weight: 600;
+}
+
+.list-tile-count {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+.list-tile[data-off] .mosaic,
+.list-tile[data-off] .list-tile-text {
+  opacity: 0.45;
+}
+
+/* The picker: the list switch and search, then the sort and filters with Select all / none, over a scrolling grid. */
+.picker-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--iro-space-3);
+  margin-bottom: var(--iro-space-3);
+}
+
+.picker-search {
+  flex: 1 1 calc(var(--iro-space-6) * 8);
+  max-width: calc(var(--iro-space-6) * 11);
+  margin-inline-start: auto;
+}
+
+.picker-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--iro-space-2);
+}
+
+.picker-select {
+  width: calc(var(--iro-space-6) * 6);
+}
+
+.picker-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--iro-space-1);
+  margin-inline-start: auto;
+}
+
+.picker-shown {
+  margin-inline-end: var(--iro-space-2);
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+.picker-empty {
+  margin: 0;
+  padding: var(--iro-space-6) 0;
+  color: var(--iro-fg-3);
+  text-align: center;
+}
+
+/* The pop-up takes the window's height (iro-ui's max-height keeps its margins), so it doesn't jump while filtering;
+   only the grid scrolls, under bars that stay put. */
+.iro-dialog.picker {
+  height: 100vh;
+}
+
+.picker .iro-dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.video-grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4) var(--iro-space-3);
+  min-height: 0;
+  margin: 0;
+  padding: var(--iro-space-1);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.video-grid[data-tall] {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 3), 1fr));
+}
+
+.video-card-button {
+  position: relative;
+  display: grid;
+  gap: var(--iro-space-2);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* Its focus ring is the Gallery tile's, drawn inside (`src/styles.css`). */
+.video-card-button:focus-visible {
+  outline: none;
+  border-radius: var(--iro-radius-md);
+}
+
+.video-card-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--iro-radius-md);
+  background: var(--iro-surface-3);
+  box-shadow: 0 0 0 2px transparent;
+  transition:
+    box-shadow var(--iro-dur-fast) var(--iro-ease),
+    filter var(--iro-dur) var(--iro-ease),
+    opacity var(--iro-dur) var(--iro-ease);
+}
+
+.video-card[data-tall] .video-card-thumb {
+  aspect-ratio: 9 / 16;
+}
+
+.video-card-button[aria-pressed="true"] .video-card-thumb {
+  box-shadow: 0 0 0 2px var(--iro-accent);
+}
+
+.video-card-button[aria-pressed="false"] .video-card-thumb {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.video-card-button:hover .video-card-thumb {
+  opacity: 1;
+}
+
+.video-card-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--iro-fg-4);
+}
+
+.video-card-empty[data-loading] {
+  animation: video-card-pulse 1.4s var(--iro-ease) infinite;
+}
+
+@keyframes video-card-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* A round check in the corner: filled when picked, an empty ring when not. */
+.video-card-check {
+  position: absolute;
+  top: var(--iro-space-2);
+  left: var(--iro-space-2);
+  display: grid;
+  place-items: center;
+  width: var(--iro-space-5);
+  height: var(--iro-space-5);
+  border: 2px solid var(--iro-on-accent);
+  border-radius: 50%;
+  background: var(--iro-accent);
+  color: var(--iro-on-accent);
+  box-shadow: var(--iro-shadow-thumb);
+  transition: background var(--iro-dur-fast) var(--iro-ease);
+}
+
+.video-card-button[aria-pressed="false"] .video-card-check {
+  background: transparent;
+  color: transparent;
+}
+
+.video-card-length {
+  position: absolute;
+  right: var(--iro-space-2);
+  bottom: var(--iro-space-2);
+  padding: 0 var(--iro-space-1);
+  border-radius: var(--iro-radius-sm);
+  background: var(--iro-bg);
+  color: var(--iro-fg);
+  font-size: var(--iro-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.video-card-text {
+  display: grid;
+  gap: var(--iro-space-1);
+}
+
+.video-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--iro-text-sm);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.video-card-views {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-xs);
+}
+
+.video-card-button[aria-pressed="false"] .video-card-title {
+  color: var(--iro-fg-3);
+}
+
+.downloads {
+  display: grid;
+  gap: var(--iro-space-2);
+}
+
+/* The heading at the left, All downloads at the right. */
+.downloads-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Link card ─────────────────────────── */
+/* Thumbnail on the left, title and facts beside it. */
+.probe {
+  display: grid;
+  grid-template-columns: calc(var(--iro-space-6) * 5) minmax(0, 1fr);
+  gap: var(--iro-space-4);
+  align-items: center;
+}
+
+.probe-thumbnail {
+  border-radius: var(--iro-radius-md);
+  overflow: hidden;
+}
+
+.probe-thumbnail-empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: var(--iro-surface-2);
+  color: var(--iro-fg-3);
+}
+
+.probe-text {
+  display: grid;
+  gap: var(--iro-space-1);
+  min-width: 0;
+}
+
+.probe-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-facts {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* The first entries of a playlist or profile, one line each. */
+.probe-items {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+}
+
+.probe-items li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

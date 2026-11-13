@@ -1,55 +1,98 @@
 // useDuplicates: one duplicate scan at a time: start it, follow its job, take the groups when it ends, and move the
-// picked copies to the trash. Every copy but each group's best starts picked.
+// picked copies to the trash. Every copy but each group's best starts picked. A scan that ends quickly (every picture
+// hashed before) keeps the last results on screen, so a rerun doesn't flash the progress for a frame.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelJob, duplicatesFound, findDuplicates, onJobFinished, onJobProgress, trashFiles } from "../lib/backend";
 import type { JobProgress } from "../lib/types/JobProgress";
+import type { JobResult } from "../lib/types/JobResult";
 import type { Picture } from "../lib/types/Picture";
 import type { Strictness } from "../lib/types/Strictness";
 
+// ── Constants ─────────────────────────────
+/** How long a scan runs before its progress shows. */
+const SHOW_AFTER_MS = 300;
+
 // ── Types ─────────────────────────────────
-export type ScanState =
+export type ScanResult =
   | { state: "idle" }
-  | { state: "running"; id: number; progress: JobProgress | null }
   | { state: "done"; groups: Picture[][] }
   | { state: "failed"; message: string };
 
 // ── Public API ────────────────────────────
 /** The scan of the whole library or `folder`, the picked paths, and the actions. */
 export function useDuplicates(folder?: string) {
-  const [scan, setScan] = useState<ScanState>({ state: "idle" });
+  const [result, setResult] = useState<ScanResult>({ state: "idle" });
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const running = scan.state === "running" ? scan.id : null;
+  const [busy, setBusy] = useState(false);
+  // `busy` once it has lasted SHOW_AFTER_MS: what the panel shows as running.
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<JobProgress | null>(null);
+  // The scan's job, once its id is known.
+  const job = useRef<number | null>(null);
+  // A scan can end before `findDuplicates` hands back its id (nothing to hash, or every picture hashed before):
+  // jobs that end while a start waits are kept, so that end isn't missed.
+  const starting = useRef(false);
+  const endedEarly = useRef(new Map<number, JobResult>());
 
   useEffect(() => {
-    if (running == null) return;
-    const stopProgress = onJobProgress((progress) => {
-      if (progress.id === running) setScan({ state: "running", id: running, progress });
-    });
-    const stopFinished = onJobFinished(async ({ id, result }) => {
-      if (id !== running) return;
-      if (result.state === "failed") return setScan({ state: "failed", message: result.message });
-      if (result.state === "cancelled") return setScan({ state: "idle" });
+    if (!busy) {
+      setRunning(false);
+      return;
+    }
+    const timer = setTimeout(() => setRunning(true), SHOW_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [busy]);
+
+  const finish = useCallback(async (id: number, ended: JobResult) => {
+    job.current = null;
+    if (ended.state === "failed") setResult({ state: "failed", message: ended.message });
+    else if (ended.state === "cancelled") setResult({ state: "idle" });
+    else {
       const groups = (await duplicatesFound(id)) ?? [];
       setPicked(new Set(groups.flatMap((group) => group.slice(1).map((picture) => picture.path))));
-      setScan({ state: "done", groups });
+      setResult({ state: "done", groups });
+    }
+    setProgress(null);
+    setBusy(false);
+  }, []);
+
+  // Listening from the start, not from when the id arrives: a fast scan's events come before that.
+  useEffect(() => {
+    const stopProgress = onJobProgress((report) => {
+      if (report.id === job.current) setProgress(report);
+    });
+    const stopFinished = onJobFinished(({ id, result: ended }) => {
+      if (id === job.current) void finish(id, ended);
+      else if (starting.current) endedEarly.current.set(id, ended);
     });
     return () => {
       stopProgress();
       stopFinished();
     };
-  }, [running]);
+  }, [finish]);
 
   const start = useCallback(
     async (strictness: Strictness) => {
+      // One scan at a time: clicks while one runs are ignored.
+      if (starting.current || job.current != null) return;
+      starting.current = true;
+      endedEarly.current.clear();
+      setBusy(true);
       try {
         const id = await findDuplicates({ folder: folder ?? null, strictness });
-        setScan({ state: "running", id, progress: null });
+        const ended = endedEarly.current.get(id);
+        if (ended) return void finish(id, ended);
+        job.current = id;
       } catch (e) {
-        setScan({ state: "failed", message: String(e) });
+        setResult({ state: "failed", message: String(e) });
+        setBusy(false);
+      } finally {
+        starting.current = false;
+        endedEarly.current.clear();
       }
     },
-    [folder],
+    [folder, finish],
   );
 
   const toggle = useCallback((path: string, on: boolean) => {
@@ -67,7 +110,7 @@ export function useDuplicates(folder?: string) {
     const moved = await trashFiles(paths);
     const gone = new Set(paths);
     setPicked(new Set());
-    setScan((current) =>
+    setResult((current) =>
       current.state === "done"
         ? {
             state: "done",
@@ -81,8 +124,8 @@ export function useDuplicates(folder?: string) {
   }, [picked]);
 
   const stop = useCallback(() => {
-    if (running != null) void cancelJob(running);
-  }, [running]);
+    if (job.current != null) void cancelJob(job.current);
+  }, []);
 
-  return { scan, picked, start, stop, toggle, trashPicked };
+  return { result, running, progress, picked, start, stop, toggle, trashPicked };
 }

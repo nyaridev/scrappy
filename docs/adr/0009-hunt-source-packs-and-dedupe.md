@@ -48,6 +48,14 @@ have no usable image API, Brave Search has no free tier, and Getty is hostile to
 - Strict, normal and loose allow 3, 6 and 10 differing bits; pictures whose shapes differ by more than 3% never
   match. Formats rank PNG, TIFF and BMP first, then WebP, JPEG and GIF; a JPEG's quality is estimated from its
   luminance table.
+- Grouping doesn't compare every pair, which grew with the square of the pictures. Each hash is filed under its four
+  16-bit quarters; two hashes at most `d` bits apart have a quarter at most `d / 4` bits apart, so a picture is
+  compared only with those filed under such a quarter (multi-index hashing). The groups are the same; 20,000 pictures
+  group in a tenth of the time, and 80,000 in about a second at Loose. A JPEG's quality is read by stepping over its
+  segments to the quantization table, not by reading its first 256 KB.
+- Hashing decodes each whole picture, so it runs on up to 8 threads (each holds one decoded picture), and the new
+  hashes are kept in one transaction, also when the scan is stopped. Dev builds optimize the dependencies
+  (`[profile.dev.package."*"]`): unoptimized decoding took over 7 minutes for 503 photos, against 6 seconds now.
 - Duplicate removal looks at the pictures in the catalog. Each hash, width and height is kept with the catalog row
   (migration 3) and is made again when the row is replaced by a new download.
 - A scan is a job that reports pictures done of the total; the window takes the groups when it ends. The copies moved

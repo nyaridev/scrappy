@@ -1,0 +1,179 @@
+/* Gallery: the folder sidebar beside the toolbar, count and grid. The tiles' styles are in `src/styles.css`, which the
+   duplicate finder shares. */
+
+/* The sidebar keeps its width and scrolls on its own, beside the grid down to the smallest window (two tiles a row
+   there); only narrower than that would it wrap above. */
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-5);
+  align-items: flex-start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 54));
+}
+
+/* One column the width of the sidebar: a long name ends in "…" instead of widening it. */
+.gallery-folders {
+  position: sticky;
+  top: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 calc(var(--iro-space-6) * 6);
+  max-width: calc(var(--iro-space-6) * 8);
+  max-height: calc(100dvh - var(--iro-space-6) * 4);
+  overflow: hidden auto;
+}
+
+/* ── Folder rows ───────────────────────── */
+/* Like iro-ui's tree rows: indented by depth, the accent's soft fill when picked; the arrow is a button of its own. */
+.folder-row {
+  display: flex;
+  align-items: center;
+  height: var(--iro-control-sm);
+  padding-left: calc(var(--depth) * var(--iro-space-4));
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+  border-radius: var(--iro-radius-sm);
+}
+
+.folder-row:hover {
+  color: var(--iro-fg);
+  background: var(--iro-field);
+}
+
+.folder-row[data-selected] {
+  color: var(--iro-fg);
+  background: var(--iro-accent-soft);
+}
+
+.folder-row-chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--iro-space-5);
+  height: 100%;
+  padding: 0;
+  color: var(--iro-fg-4);
+  font-size: var(--iro-text-xs);
+  background: transparent;
+  border: 0;
+  border-radius: var(--iro-radius-sm);
+}
+
+button.folder-row-chevron {
+  cursor: pointer;
+}
+
+button.folder-row-chevron:hover {
+  color: var(--iro-fg);
+}
+
+.folder-row-chevron[data-open] {
+  rotate: 90deg;
+}
+
+.folder-row-main {
+  display: flex;
+  flex: 1;
+  gap: var(--iro-space-1);
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  padding: 0 var(--iro-space-1) 0 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--iro-radius-sm);
+  cursor: pointer;
+}
+
+:is(.folder-row-main, button.folder-row-chevron):focus-visible {
+  outline: calc(var(--iro-space-1) / 2) solid var(--iro-focus);
+  outline-offset: calc(var(--iro-space-1) / -2);
+}
+
+.folder-row-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--iro-fg-3);
+}
+
+.folder-row[data-selected] .folder-row-icon {
+  color: var(--iro-accent-ink);
+}
+
+.folder-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row-files {
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--iro-space-2);
+  color: var(--iro-fg-4);
+  font-family: var(--iro-font-mono);
+  font-size: var(--iro-text-2xs);
+}
+
+/* ── Main ──────────────────────────────── */
+.gallery-main {
+  display: grid;
+  flex: 999 1 calc(var(--iro-space-6) * 12);
+  gap: var(--iro-space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Search takes the room left; the two choices and the duplicates button keep their size and wrap under it together
+   on a narrow window, each choice then sharing the row. */
+.gallery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-3);
+}
+
+/* Beside the choices, search takes nearly all the room left; alone on a row, the choices fill it. */
+.gallery-search {
+  flex: 999 1 calc(var(--iro-space-6) * 8);
+}
+
+.gallery-choices {
+  display: flex;
+  flex: 1 0 auto;
+  gap: var(--iro-space-3);
+}
+
+.gallery-choices > * {
+  flex: 1 0 calc(var(--iro-space-6) * 5);
+}
+
+.gallery-choices > .iro-icon-button {
+  flex: none;
+}
+
+.gallery-count {
+  color: var(--iro-fg-3);
+  font-size: var(--iro-text-sm);
+}
+
+/* Three tiles a row at the window's starting size, more as it widens. */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--iro-space-6) * 6), 1fr));
+  gap: var(--iro-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-end {
+  display: grid;
+  place-items: center;
+  min-height: var(--iro-space-6);
+}

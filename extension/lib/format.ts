@@ -1,4 +1,4 @@
-// Format: sizes written for people, the same way the app writes them.
+// Format: sizes and lengths written for people, the same way the app writes them.
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
 
@@ -11,4 +11,12 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   return `${unit >= 2 ? value.toFixed(1) : Math.round(value)} ${UNITS[unit]}`;
+}
+
+/** `3725` → `"1:02:05"`, `65` → `"1:05"`. */
+export function formatDuration(seconds: number): string {
+  const whole = Math.round(seconds);
+  const [hours, minutes, rest] = [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60];
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return hours ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`;
 }

@@ -17,8 +17,8 @@ A desktop app for keeping things from the web, for Windows, macOS and Linux.
 | View | Does |
 |---|---|
 | **Download** | Saves video and audio from YouTube, X, Instagram, Facebook and any other site: one link, a playlist or a profile. |
-| **Grab** | Lists every video, stream and image a page loads, and saves the ones you pick. |
-| **Scrape** | Crawls a site for its images and files, or mirrors it to read offline. |
+| **Grab** | Lists every video, stream, image and file on a page and the pages it links to, to a depth, and saves the ones you pick or all of them as it finds them. |
+| **Scrape** | Mirrors a site to read offline, then lets you pick which of its images and videos to save, or saves one page with everything it needs. |
 | **Hunt** | Finds images by topic across the web. |
 | **Gallery** | Shows everything in the library folder, and removes duplicates. |
 
@@ -37,7 +37,9 @@ Scrappy downloads yt-dlp, Deno, gallery-dl and ffmpeg itself and keeps them up t
 
 ## Extension
 
-A popup for Chrome, Brave, Edge and Firefox that sends a page's videos and images to the app.
+For Chrome, Brave, Edge and Firefox. It adds a Download button beside YouTube's, SoundCloud's, X's and Twitch clips'
+own buttons, and over any other page's video, which sends it to the app; Scrappy downloads it with the start preset and
+quality from Settings. Its popup lists a page's videos and images to pick from.
 
 ```bash
 pnpm -C extension build

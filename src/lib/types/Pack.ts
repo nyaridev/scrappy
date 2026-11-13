@@ -9,10 +9,22 @@ export type Pack = {
  */
 id: string, name: string, 
 /**
- * Also search the whole web, besides its sites.
+ * The heading Hunt lists it under; `None` for a user's own pack that names none.
+ */
+group: string | null, 
+/**
+ * Also search any site (the web search), besides its sites.
  */
 web: boolean, 
 /**
  * Sites searched one by one (`site:fandom.com`).
  */
-sites: Array<string>, };
+sites: Array<string>, 
+/**
+ * Sites in `sites` switched off: Hunt shows them unticked.
+ */
+off: Array<string>, 
+/**
+ * One of Scrappy's own packs: it can't be removed or renamed (ADR-0028). Set by core; ignored when sent to it.
+ */
+builtIn: boolean, };

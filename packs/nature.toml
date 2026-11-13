@@ -1,0 +1,13 @@
+# Nature and animals: species observations, photo sites and encyclopedias.
+name = "Nature and animals"
+group = "Science and history"
+web = false
+sites = [
+  "inaturalist.org",
+  "flickr.com",
+  "commons.wikimedia.org",
+  "wikipedia.org",
+  "pixabay.com",
+  "unsplash.com",
+  "pexels.com",
+]

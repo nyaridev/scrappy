@@ -14,19 +14,21 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::engine;
-use crate::app::USER_AGENT;
+use crate::net;
 use crate::library::template::Fields;
 use crate::tools::Toolbox;
-use crate::vault::CookieFile;
+use crate::vault::{self, CookieFile};
 
 // ── Constants ─────────────────────────────
 const PROBE_TIMEOUT: Duration = Duration::from_secs(90);
 const THUMBNAIL_TIMEOUT: Duration = Duration::from_secs(10);
 const THUMBNAIL_MAX_BYTES: usize = 2_000_000;
+/// yt-dlp's answer, with its generic reader off, for a page no site reader knows.
+pub(super) const NO_READER: &str = "No reader knows this page.";
 /// The smallest thumbnail at least this wide is fetched: enough for the window's cards, and light to keep.
 const THUMBNAIL_WIDTH: u32 = 320;
 /// How many entries of a playlist or channel (and of each section) a probe lists; a bigger one shows "1000+".
-const LIST_LIMIT: u32 = 1000;
+pub(super) const LIST_LIMIT: u32 = 1000;
 /// How many entries' titles the window shows.
 pub(super) const PREVIEW_ITEMS: usize = 5;
 /// A playlist's videos differ, so its quality choice offers the common heights.
@@ -60,6 +62,8 @@ pub struct Probe {
     pub sections: Vec<Section>,
     /// A playlist's videos as listed (up to 1000); empty for a channel (its sections have them) and for one video.
     pub entries: Vec<ListEntry>,
+    /// For a list read from one of its videos (`watch?v=…&list=…`, a Mix too): that video's own link.
+    pub video: Option<String>,
 }
 
 /// One video of a list, as the probe listed it.
@@ -102,6 +106,7 @@ pub(super) struct Info {
     duration: Option<f64>,
     upload_date: Option<String>,
     extractor_key: Option<String>,
+    webpage_url: Option<String>,
     thumbnail: Option<String>,
     #[serde(default)]
     thumbnails: Vec<Thumbnail>,
@@ -147,11 +152,25 @@ struct Format {
 }
 
 // ── Private helpers ───────────────────────
-/// A video link that names a playlist (`watch?v=…&list=PL…`) is read as the playlist. A YouTube Mix (`list=RD…`) is
-/// a radio made up for the viewer, so its link stays the one video.
-fn names_playlist(url: &str) -> bool {
+/// A video link that names a list (`watch?v=…&list=PL…`, or a Mix's `list=RD…`) is read as the list.
+pub(super) fn names_playlist(url: &str) -> bool {
     let Ok(url) = Url::parse(url) else { return false };
-    url.query_pairs().any(|(key, value)| key == "list" && !value.is_empty() && !value.starts_with("RD"))
+    url.query_pairs().any(|(key, value)| key == "list" && !value.is_empty())
+}
+
+/// The one video of a link that names a list: the link without its list.
+fn video_link(url: &str) -> Option<String> {
+    let mut link = Url::parse(url).ok()?;
+    if !names_playlist(url) || !link.query_pairs().any(|(key, _)| key == "v") {
+        return None;
+    }
+    let kept: Vec<(String, String)> = link
+        .query_pairs()
+        .filter(|(key, _)| !matches!(key.as_ref(), "list" | "index" | "start_radio" | "pp"))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    link.query_pairs_mut().clear().extend_pairs(kept);
+    Some(link.into())
 }
 
 /// A list's size: yt-dlp's count when it has one, else the entries listed, with "more" when listing stopped at the
@@ -208,17 +227,29 @@ impl Info {
         self.extractor_key.as_ref().map(|key| key.to_lowercase())
     }
 
-    /// The facts a path template uses. The channel falls back to the uploader, as many sites only have one.
+    /// yt-dlp's generic reader read it: a plain file or stream, named after its link (`master`), not its page.
+    pub(super) fn generic(&self) -> bool {
+        self.extractor_key.as_deref() == Some("Generic")
+    }
+
+    /// The facts a path template uses. The channel falls back to the uploader, as many sites only have one. The site
+    /// is the page's domain (`youtube.com`); none for a plain file or stream, whose link names only its server.
     pub(super) fn fields(&self) -> Fields {
+        let site = (!self.generic()).then(|| self.webpage_url.as_deref().and_then(vault::site_of)).flatten();
         Fields {
             title: Some(self.title()),
             id: Some(self.id.clone()),
             channel: self.channel.clone().or_else(|| self.uploader.clone()),
             playlist: None,
             upload_date: self.upload_date.clone(),
-            site: self.site(),
+            site: site.or_else(|| self.site().filter(|_| !self.generic())),
             user: self.uploader.clone(),
         }
+    }
+
+    /// Every format it offers is audio alone (SoundCloud, a podcast); `false` when a format has video or doesn't say.
+    pub(super) fn audio_only(&self) -> bool {
+        !self.formats.is_empty() && self.formats.iter().all(|f| f.vcodec.as_deref() == Some("none"))
     }
 
     /// What the window shows, with the thumbnail already fetched.
@@ -260,6 +291,7 @@ impl Info {
             items: items.collect(),
             entries: if self.is_playlist() && sections.is_empty() { list_entries(&self.entries) } else { Vec::new() },
             sections,
+            video: if self.is_playlist() { video_link(url) } else { None },
         }
     }
 
@@ -278,9 +310,13 @@ impl Info {
             .collect()
     }
 
-    /// The smallest thumbnail at least 320 pixels wide, else yt-dlp's pick.
+    /// The smallest thumbnail at least 320 pixels wide, else yt-dlp's pick; a list without one (a Mix) takes its
+    /// first video's.
     pub(super) fn thumbnail_url(&self) -> Option<&str> {
-        small_thumbnail(&self.thumbnails).map(|t| t.url.as_str()).or(self.thumbnail.as_deref())
+        let first = self.entries.iter().find(|entry| !entry.is_section()).and_then(|entry| {
+            small_thumbnail(&entry.thumbnails).map(|t| t.url.as_str()).or(entry.thumbnail.as_deref())
+        });
+        small_thumbnail(&self.thumbnails).map(|t| t.url.as_str()).or(self.thumbnail.as_deref()).or(first)
     }
 
     /// Each listed video's link with its thumbnail's, sections' videos included.
@@ -296,16 +332,21 @@ impl Info {
 }
 
 /// Runs `yt-dlp -J` on `url` (already checked), with the page's allowed headers and a sign-in when there is one,
-/// and returns its JSON.
+/// and returns its JSON. `known_only` turns the generic reader off: a page no site reader knows fails at once with
+/// `NO_READER` (ADR-0042).
 pub(super) async fn fetch(
     toolbox: &Toolbox,
     url: &str,
     headers: &[(String, String)],
     cookies: Option<&CookieFile>,
+    known_only: bool,
 ) -> Result<String, String> {
     let mut command = engine::yt_dlp(toolbox)?;
     engine::add_headers(&mut command, headers);
     engine::add_cookies(&mut command, cookies);
+    if known_only {
+        command.args(["--ies", "default,-generic"]);
+    }
     // A playlist or channel is listed, not resolved video by video; one video still comes with its formats.
     if names_playlist(url) {
         // After the `--no-playlist` every yt-dlp run starts with; the later one wins.
@@ -318,7 +359,8 @@ pub(super) async fn fetch(
         .map_err(|e| format!("yt-dlp didn't start: {e}"))?;
     if !output.status.success() {
         let lines: Vec<String> = String::from_utf8_lossy(&output.stderr).lines().map(String::from).collect();
-        return Err(engine::error_text(&lines));
+        let error = engine::error_text(&lines);
+        return Err(if error.starts_with("No suitable extractor") { NO_READER.into() } else { error });
     }
     String::from_utf8(output.stdout).map_err(|_| "yt-dlp's answer couldn't be read.".into())
 }
@@ -337,7 +379,7 @@ pub(super) fn section_listings(json: &str) -> Vec<(String, String)> {
 /// Downloads a thumbnail and returns it as a `data:` URL; `None` when there's none or it fails.
 pub(super) async fn thumbnail(url: Option<&str>) -> Option<String> {
     let url = engine::check_url(url?).ok()?;
-    let client = reqwest::Client::builder().timeout(THUMBNAIL_TIMEOUT).user_agent(USER_AGENT).build().ok()?;
+    let client = net::client().timeout(THUMBNAIL_TIMEOUT).build().ok()?;
     let response = client.get(url).send().await.ok()?.error_for_status().ok()?;
     let mime = response
         .headers()
@@ -352,14 +394,32 @@ pub(super) async fn thumbnail(url: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Info, names_playlist};
+    use super::{Info, names_playlist, video_link};
 
     #[test]
-    fn reads_a_video_in_a_playlist_as_the_playlist_but_not_a_mix() {
+    fn is_audio_only_when_every_format_says_so() {
+        let audio_only = |json: &str| Info::parse(json).unwrap().audio_only();
+        assert!(audio_only(r#"{"id":"a","formats":[{"vcodec":"none"},{"vcodec":"none"}]}"#));
+        // A format that doesn't name its codec may hold video (X, plain file links).
+        assert!(!audio_only(r#"{"id":"b","formats":[{"vcodec":"none"},{"height":null}]}"#));
+        assert!(!audio_only(r#"{"id":"c","formats":[{"vcodec":"avc1","height":720}]}"#));
+        assert!(!audio_only(r#"{"id":"d"}"#));
+    }
+
+    #[test]
+    fn reads_a_video_in_a_playlist_or_mix_as_the_list() {
         assert!(names_playlist("https://www.youtube.com/watch?v=cvaIgq5j2Q8&list=PL0wqt_um4x0bsdViTJBmnl6KGMoSqxfZy"));
-        assert!(!names_playlist("https://www.youtube.com/watch?v=cvaIgq5j2Q8&list=RDcvaIgq5j2Q8&start_radio=1"));
+        assert!(names_playlist("https://www.youtube.com/watch?v=cvaIgq5j2Q8&list=RDcvaIgq5j2Q8&start_radio=1"));
         assert!(!names_playlist("https://www.youtube.com/watch?v=cvaIgq5j2Q8"));
         assert!(!names_playlist("https://www.youtube.com/watch?v=cvaIgq5j2Q8&list="));
+    }
+
+    #[test]
+    fn keeps_the_one_video_of_a_list_link() {
+        let mix = "https://www.youtube.com/watch?v=Tx8Ml-k4Z-8&list=RDdgKjUrX5YKs&index=3&t=42";
+        assert_eq!(video_link(mix).as_deref(), Some("https://www.youtube.com/watch?v=Tx8Ml-k4Z-8&t=42"));
+        assert_eq!(video_link("https://www.youtube.com/playlist?list=PL1"), None);
+        assert_eq!(video_link("https://www.youtube.com/watch?v=a"), None);
     }
 
     const SAMPLE: &str = r#"{"id":"jNQXAC9IVRw","title":"Me at the zoo","channel":null,"uploader":"jawed",
@@ -387,6 +447,9 @@ mod tests {
         assert_eq!(Info::parse(json).unwrap().thumbnail_url(), Some("https://i.ytimg.com/mq.jpg"));
         let only_pick = r#"{"id":"a","thumbnail":"https://example.com/t.jpg"}"#;
         assert_eq!(Info::parse(only_pick).unwrap().thumbnail_url(), Some("https://example.com/t.jpg"));
+        let mix = r#"{"id":"RD1","_type":"playlist","entries":[{"id":"a","url":"https://www.youtube.com/watch?v=a",
+            "thumbnails":[{"url":"https://i.ytimg.com/a.jpg","width":336,"height":188}]}]}"#;
+        assert_eq!(Info::parse(mix).unwrap().thumbnail_url(), Some("https://i.ytimg.com/a.jpg"));
     }
 
     #[test]

@@ -11,7 +11,8 @@ The reasons are in ADR-0005.
 
 ## Cookies and secrets
 
-- Ask for cookies only when a site needs them, and for that one domain. Never read a browser's whole cookie store.
+- Ask for cookies only when a site needs them or the user shares a site's sign-in from the popup, and for that one
+  domain. Never read a browser's whole cookie store.
 - Grab's deep scan runs the browser with a new, empty profile in a temporary folder, never the user's profile.
 - Remembered cookies live only in `vault`, encrypted with the key from the OS keychain. Never in settings, the
   catalog, the library folder or plain files.
@@ -31,6 +32,10 @@ The reasons are in ADR-0005.
 - Messages from the extension: check size and shape in `bridge` before using anything in them.
 - Tools downloaded by `tools` must match their pinned SHA-256 when downloaded; delete a download that doesn't, and
   never unpack or run it. yt-dlp's own updater checks its updates (ADR-0012).
+- The extension fetched from a release must match the SHA-256 GitHub gives for the asset, and is unpacked with every
+  entry kept inside its folder (ADR-0040).
+- Scrappy's own updates are signed: the updater checks each against the public key in `tauri.conf.json` before it
+  runs it, with `requireSignedVersion` on. The private key lives only in GitHub's secrets (ADR-0037).
 
 ## Logs and errors
 
@@ -42,3 +47,5 @@ The reasons are in ADR-0005.
 ## Window
 
 - Grant the window no plugin permissions without an ADR-0005 change, and never load a remote URL in it.
+- The CSP's `media-src` is the app's `scrappy:` protocol only (ADR-0023); it serves library video and audio, checked
+  by `library::serve`.

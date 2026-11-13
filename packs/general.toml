@@ -1,4 +1,17 @@
-# General: the whole web, for any topic.
+# General: encyclopedias, photo sites and image boards, for any topic.
 name = "General"
-web = true
-sites = []
+group = "Photos"
+web = false
+sites = [
+  "wikipedia.org",
+  "commons.wikimedia.org",
+  "flickr.com",
+  "unsplash.com",
+  "pexels.com",
+  "pixabay.com",
+  "deviantart.com",
+  "tumblr.com",
+  "wallhaven.cc",
+  "reddit.com",
+  "pinterest.com",
+]

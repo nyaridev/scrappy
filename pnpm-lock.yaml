@@ -12,8 +12,8 @@ importers:
         specifier: ^2
         version: 2.12.4
       iro-ui:
-        specifier: github:nyaridev/iro-ui#v1.1.0
-        version: https://codeload.github.com/nyaridev/iro-ui/tar.gz/abc6b17b72fdf121458f29b0b21d8391bb6300ac(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: github:nyaridev/iro-ui#v1.2.0
+        version: https://codeload.github.com/nyaridev/iro-ui/tar.gz/bc569561183f0f31f8a396b306e288937d1b7be3(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: ^19.1.0
         version: 19.3.1
@@ -52,8 +52,8 @@ importers:
   extension:
     dependencies:
       iro-ui:
-        specifier: github:nyaridev/iro-ui#v1.1.0
-        version: https://codeload.github.com/nyaridev/iro-ui/tar.gz/abc6b17b72fdf121458f29b0b21d8391bb6300ac(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: github:nyaridev/iro-ui#v1.2.0
+        version: https://codeload.github.com/nyaridev/iro-ui/tar.gz/bc569561183f0f31f8a396b306e288937d1b7be3(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: ^19.2.4
         version: 19.3.1
@@ -717,9 +717,9 @@ packages:
   htmlparser2@10.1.0:
     resolution: {integrity: sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ==}
 
-  iro-ui@https://codeload.github.com/nyaridev/iro-ui/tar.gz/abc6b17b72fdf121458f29b0b21d8391bb6300ac:
-    resolution: {gitHosted: true, integrity: sha512-ufn9zMvZ1vlk3stTp0RgBVxr5vxjT7/ynE622s3WwBBnxc+zZdfv88f6JkzVI/VzdW/BlD7/VQ7p6yhr0quwJg==, tarball: https://codeload.github.com/nyaridev/iro-ui/tar.gz/abc6b17b72fdf121458f29b0b21d8391bb6300ac}
-    version: 1.1.0
+  iro-ui@https://codeload.github.com/nyaridev/iro-ui/tar.gz/bc569561183f0f31f8a396b306e288937d1b7be3:
+    resolution: {gitHosted: true, integrity: sha512-2SVIO6WNGkvZLnmVwF7WwqY7OFzN+VQlzNBbY20qobQbC6IeHxTG5uaJKRwiefWQikjRyKQhSSms4BFIiRC/bg==, tarball: https://codeload.github.com/nyaridev/iro-ui/tar.gz/bc569561183f0f31f8a396b306e288937d1b7be3}
+    version: 1.2.0
     peerDependencies:
       react: '>=19'
       react-dom: '>=19'
@@ -1666,7 +1666,7 @@ snapshots:
       domutils: 3.2.2
       entities: 7.0.1
 
-  iro-ui@https://codeload.github.com/nyaridev/iro-ui/tar.gz/abc6b17b72fdf121458f29b0b21d8391bb6300ac(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  iro-ui@https://codeload.github.com/nyaridev/iro-ui/tar.gz/bc569561183f0f31f8a396b306e288937d1b7be3(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       '@base-ui/react': 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@fontsource-variable/cinzel': 5.3.0

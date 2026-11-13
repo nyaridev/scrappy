@@ -1,0 +1,18 @@
+/* The Downloads view: the page and its bar over the download list. */
+
+/* ── Downloads ─────────────────────────── */
+.downloads-page {
+  display: grid;
+  gap: var(--iro-space-4);
+  align-content: start;
+  justify-self: center;
+  width: min(100%, calc(var(--iro-space-6) * 30));
+}
+
+.downloads-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--iro-space-3);
+}

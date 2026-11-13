@@ -1,0 +1,14 @@
+# Anime and manga: image boards that keep to safe content, databases and wikis.
+name = "Anime and manga"
+group = "Entertainment"
+web = false
+sites = [
+  "zerochan.net",
+  "safebooru.org",
+  "myanimelist.net",
+  "anilist.co",
+  "fandom.com",
+  "wallhaven.cc",
+  "pixiv.net",
+  "reddit.com",
+]
