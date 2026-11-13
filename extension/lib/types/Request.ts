@@ -12,4 +12,8 @@ export type Request = { "type": "hello" } | { "type": "send", url: string, kind:
 /**
  * The link's site's cookies, sent only after the app asked for them with `NeedsCookies`.
  */
-cookies: CookieGrant | null, } | { "type": "grab", pageUrl: string, title: string | null, finds: Array<Noted>, } | { "type": "look", url: string, } | { "type": "site", url: string, } | { "type": "signIn", url: string, cookies: Array<Cookie>, };
+cookies: CookieGrant | null, 
+/**
+ * A preset's id, from a button that names one (MP4, MP3); none for the start preset.
+ */
+preset: string | null, } | { "type": "grab", pageUrl: string, title: string | null, finds: Array<Noted>, } | { "type": "look", url: string, } | { "type": "site", url: string, } | { "type": "signIn", url: string, cookies: Array<Cookie>, };

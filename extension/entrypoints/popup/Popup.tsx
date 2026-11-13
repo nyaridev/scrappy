@@ -171,6 +171,7 @@ export function Popup() {
         title,
         headers: item.headers ?? [],
         cookies,
+        preset: null,
       });
       return statusOf(reply);
     })().catch((error: Error) => ({ state: "failed", message: error.message }) as const);

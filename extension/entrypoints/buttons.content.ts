@@ -12,20 +12,23 @@ const SETTLE_MS = 400;
 
 // ── Private helpers ───────────────────────
 function watchSite(site: Site) {
-  const placed = new WeakMap<Element, PageButton>();
+  // Each anchor's buttons, by format: an anchor can hold MP4 and MP3.
+  const placed = new WeakMap<Element, Map<string, PageButton>>();
   let waiting = 0;
 
   function update() {
     waiting = 0;
     const dark = site.dark();
-    for (const { anchor, put, url, title } of site.places()) {
-      const known = placed.get(anchor);
+    for (const { anchor, put, url, title, format } of site.places()) {
+      const buttons = placed.get(anchor) ?? new Map<string, PageButton>();
+      placed.set(anchor, buttons);
+      const known = buttons.get(format?.preset ?? "");
       if (known?.host.isConnected) {
-        known.aim({ url, title });
+        known.aim({ url, title, format });
         continue;
       }
-      const button = makeButton(site.look, dark, { url, title });
-      placed.set(anchor, button);
+      const button = makeButton(site.look, dark, { url, title, format });
+      buttons.set(format?.preset ?? "", button);
       if (put === "append") anchor.append(button.host);
       else if (put === "before") anchor.before(button.host);
       else anchor.after(button.host);

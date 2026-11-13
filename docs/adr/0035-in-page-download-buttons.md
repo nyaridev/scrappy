@@ -1,6 +1,7 @@
 # ADR-0035: In-page download buttons
 
-**Status:** Accepted; YouTube embeds and asking before sending a stream: ADR-0042
+**Status:** Accepted; YouTube embeds and asking before sending a stream: ADR-0042; MP4 and MP3 buttons on YouTube:
+ADR-0043
 **Date:** 2026-11-13
 **Amends:** ADR-0006 (the extension runs a content script on every page; a sent video uses the start preset)
 

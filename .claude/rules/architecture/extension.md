@@ -32,6 +32,8 @@ Grab view ("Grab all"). A content script adds Download buttons to pages (ADR-003
   not as a stream it loaded.
 - Sizes in the popup are the response's, else the page's resource timing, else guessed from pixels and length
   (`sizeGuess` in `lib/media.ts`), shown with `~`.
+- A button sends the start preset unless its place gives a `format` (label and an app preset's id, ADR-0043), as
+  YouTube's MP4 and MP3 do. Those ids and `media/presets.rs` change together.
 - The overlay also covers YouTube's embedded players (`lib/buttons/overlay.ts`); another site's embed is one more
   pattern there, sending that video's own page.
 

@@ -68,7 +68,7 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 | [0032](0032-grab-scans-with-the-browser-only.md) | Grab scans with the browser only, to a depth (no Fast, no page limit to set) | Accepted |
 | [0033](0033-mirror-pages-first-media-picked-after.md) | A mirror saves its pages first; its images and videos are picked after, with a most video size | Accepted |
 | [0034](0034-preferences.md) | Preferences: subtitles and embedding, names, the start preset and quality, a proxy, each view's starting values, duplicate strictness, yt-dlp's updates | Accepted (default name by site: 0042) |
-| [0035](0035-in-page-download-buttons.md) | In-page Download buttons on YouTube, SoundCloud, X and Twitch clips, and over any page's video | Accepted (embeds, asking first: 0042) |
+| [0035](0035-in-page-download-buttons.md) | In-page Download buttons on YouTube, SoundCloud, X and Twitch clips, and over any page's video | Accepted (embeds, asking first: 0042; MP4 and MP3 on YouTube: 0043) |
 | [0036](0036-start-with-the-system.md) | Start with the system, minimized | Accepted (in the tray: 0038; the installer's box: 0041) |
 | [0037](0037-updates-from-github-releases.md) | Signed updates from GitHub releases; installers only | Accepted |
 | [0038](0038-close-to-the-tray.md) | Close to the tray | Accepted |
@@ -76,6 +76,7 @@ the base; `tools` → `media` → `grab`/`crawl`/`hunt` build on them; `vault` a
 | [0040](0040-extension-files-from-the-release.md) | The extension's files from the release for this version | Accepted |
 | [0041](0041-start-with-windows-in-the-installer.md) | Start with Windows in the installer, checked | Accepted |
 | [0042](0042-extension-reads-the-page-first.md) | The extension reads the page first: the video card, sharing a sign-in, size filters, embeds, videos by site | Accepted |
+| [0043](0043-mp4-and-mp3-buttons-on-youtube.md) | MP4 and MP3 buttons on YouTube; a send can name a preset | Accepted |
 
 ## Milestones
 

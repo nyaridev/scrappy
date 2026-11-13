@@ -76,6 +76,9 @@ pub enum Request {
         /// The link's site's cookies, sent only after the app asked for them with `NeedsCookies`.
         #[serde(default)]
         cookies: Option<CookieGrant>,
+        /// A preset's id, from a button that names one (MP4, MP3); none for the start preset.
+        #[serde(default)]
+        preset: Option<String>,
     },
     /// Open this page in Grab with everything the extension noted on it.
     Grab {
@@ -336,6 +339,8 @@ mod tests {
         assert!(check_sign_in(page, vec![cookie(".evil.com")]).is_err());
         assert!(check_sign_in(page, Vec::new()).is_err());
         assert!(check_sign_in("file:///C:/x", vec![cookie(".instagram.com")]).is_err());
+        let mp3 = br#"{"type":"send","url":"https://a.com/v","kind":"video","pageUrl":null,"title":null,"preset":"mp3"}"#;
+        assert!(matches!(Request::parse(mp3).unwrap(), Request::Send { preset: Some(id), .. } if id == "mp3"));
         let ask = Request::parse(br#"{"type":"look","url":"https://a.com/"}"#).unwrap();
         assert_eq!(ask, Request::Look { url: "https://a.com/".into() });
     }

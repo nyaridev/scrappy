@@ -120,12 +120,16 @@ pub struct DownloadEntry {
 
 /// What a link comes with: the page's headers, a sign-in given for it, the row's source, and the page it was sent
 /// from.
-type Given<'a> = (Vec<(String, String)>, Option<Vec<Cookie>>, DownloadSource, Option<&'a SentFrom>);
+type Given<'a> = (Vec<(String, String)>, Option<Vec<Cookie>>, DownloadSource, Option<&'a Sent>);
 
-/// The page the extension sent a link from, and its title: a plain stream is named after them (ADR-0042).
-pub struct SentFrom {
-    pub page_url: String,
+/// What the extension sent with a link: the page and its title, which a plain stream is named after (ADR-0042),
+/// and the preset a button picked (ADR-0043).
+#[derive(Default)]
+pub struct Sent {
+    pub page_url: Option<String>,
     pub title: Option<String>,
+    /// A preset's id; `None` for the start preset from Settings.
+    pub preset: Option<String>,
 }
 
 /// A new row: where it came from, its link and title, and what the list's preset column shows.
@@ -195,9 +199,10 @@ impl From<String> for SendError {
 
 /// For a plain stream yt-dlp named after its link (`master`): its title, place and site from the page it was sent
 /// from. `None` when yt-dlp knew the site, or the page doesn't say.
-fn named(from: &SentFrom, info_json: &str, audio: bool) -> Option<(String, PathBuf, Option<String>)> {
+fn named(from: &Sent, info_json: &str, audio: bool) -> Option<(String, PathBuf, Option<String>)> {
+    let page_url = from.page_url.as_deref()?;
     let info = probe::Info::parse(info_json).ok().filter(probe::Info::generic)?;
-    let site = crate::vault::site_of(&from.page_url);
+    let site = crate::vault::site_of(page_url);
     let title = from.title.clone().filter(|title| !title.trim().is_empty()).or_else(|| site.clone())?;
     let fields = Fields { title: Some(title.clone()), id: None, site: site.clone(), ..info.fields() };
     Some((title, template::render(&engine::place_template(audio), &fields), site))
@@ -320,13 +325,14 @@ impl Downloads {
 
     /// Queues a link the extension sent, with the start preset and quality from Settings (an audio preset for a link
     /// with no video, ADR-0035), the page's allowed headers and a sign-in given for it, if any (`bridge` checked them
-    /// all). A playlist or profile saves its first 50 files. A plain stream takes `from`'s title and site.
+    /// all). A playlist or profile saves its first 50 files. A plain stream takes the page's title and site, and a
+    /// preset `sent` names replaces the start one.
     pub async fn send_video(
         &self,
         jobs: &Arc<Jobs>,
         root: PathBuf,
         url: &str,
-        from: Option<SentFrom>,
+        sent: Sent,
         headers: Vec<(String, String)>,
         cookies: Option<Vec<Cookie>>,
     ) -> Result<DownloadEntry, SendError> {
@@ -337,9 +343,12 @@ impl Downloads {
         let media = engine::options();
         // A list is video; a single link is audio only when every format it offers says so.
         let has_video = probed.probe.count.is_some() || !probe::Info::parse(&probed.json).is_ok_and(|info| info.audio_only());
-        let preset = presets::for_send(media.preset.as_deref(), has_video);
+        let preset = match sent.preset.as_deref() {
+            Some(id) => presets::find(id).ok_or_else(|| SendError::Failed("Unknown preset.".into()))?,
+            None => presets::for_send(media.preset.as_deref(), has_video),
+        };
         let choice = (preset, media.max_height, Some(EXTENSION_LIMIT));
-        let given = (headers, cookies, DownloadSource::Extension, from.as_ref());
+        let given = (headers, cookies, DownloadSource::Extension, Some(&sent));
         self.queue_link(jobs, root, url, choice, &[], given).await
     }
 
@@ -580,7 +589,7 @@ impl Downloads {
 
 #[cfg(test)]
 mod tests {
-    use super::{DownloadRequest, DownloadSource, DownloadState, Downloads, Row, SentFrom, named};
+    use super::{DownloadRequest, DownloadSource, DownloadState, Downloads, Row, Sent, named};
     use crate::jobs::{JobEvent, Jobs};
     use crate::tools::Toolbox;
     use crate::vault::{KeySource, Vault};
@@ -589,8 +598,8 @@ mod tests {
 
     #[test]
     fn names_a_plain_stream_after_its_page() {
-        let page_url = "https://www.pornhub.com/view_video.php?viewkey=a".to_string();
-        let from = SentFrom { page_url, title: Some("Clip".into()) };
+        let page_url = Some("https://www.pornhub.com/view_video.php?viewkey=a".to_string());
+        let from = Sent { page_url, title: Some("Clip".into()), preset: None };
         let stream = r#"{"id":"master","title":"master","extractor_key":"Generic","webpage_url":"https://cdn.example/master.m3u8"}"#;
         let (title, place, site) = named(&from, stream, false).unwrap();
         assert_eq!((title.as_str(), site.as_deref()), ("Clip", Some("pornhub.com")));

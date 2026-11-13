@@ -6,6 +6,8 @@ export interface DownloadAsk {
   type: "download";
   url: string | null;
   title: string | null;
+  /** A preset's id for a button that names its format (MP4, MP3); `null` for the start preset. */
+  preset: string | null;
 }
 
 /** How a send went. */

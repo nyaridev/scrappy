@@ -1,5 +1,6 @@
-// Button: one in-page Download button in a closed shadow root (ADR-0035). A click asks the background script to send
-// its link to the app, and the button shows Sending, then Queued, a sign-in to share from the popup, or the error.
+// Button: one in-page Download button in a closed shadow root (ADR-0035), or one named for its format (MP4, MP3:
+// ADR-0043). A click asks the background script to send its link to the app, and the button shows Sending, then
+// Queued, a sign-in to share from the popup, or the error.
 
 import { SEND_TIMEOUT_MS } from "../app";
 import type { DownloadAsk, Outcome } from "../asks";
@@ -21,10 +22,12 @@ const GIVE_UP_MS = SEND_TIMEOUT_MS + 5000;
 // ── Types ─────────────────────────────────
 type State = "idle" | "sending" | Outcome["state"];
 
-/** What a button sends: a link, or `null` for the video the tab plays. */
+/** What a button sends: a link, or `null` for the video the tab plays. A button with a `format` (`MP4`) is labelled
+ * with it and sends that `preset` (an app preset's id). */
 export interface Target {
   url: string | null;
   title: string | null;
+  format?: { label: string; preset: string };
 }
 
 /** A placed button: its element, and a way to point it at another link when the page changes in place. */
@@ -56,7 +59,12 @@ function icon(paths: string[]): SVGSVGElement {
 }
 
 async function ask(target: Target): Promise<Outcome> {
-  const message: DownloadAsk = { type: "download", ...target };
+  const message: DownloadAsk = {
+    type: "download",
+    url: target.url,
+    title: target.title,
+    preset: target.format?.preset ?? null,
+  };
   let timer = 0;
   const late = new Promise<Outcome>((done) => {
     timer = window.setTimeout(() => done({ state: "failed", message: "Scrappy didn't answer." }), GIVE_UP_MS);
@@ -90,7 +98,10 @@ export function makeButton(look: Look, dark: boolean, target: Target): PageButto
 
   function show(next: State, reason = "") {
     state = next;
-    const shown = LOOK_OF[next];
+    const format = next === "idle" ? aimed.format?.label : undefined;
+    const shown = format
+      ? { ...LOOK_OF.idle, label: format, tip: `Download as ${format} with Scrappy` }
+      : LOOK_OF[next];
     const text = reason || shown.tip;
     button.dataset.state = next;
     const label = document.createElement("span");

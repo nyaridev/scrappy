@@ -20,7 +20,7 @@ mod thumbnail;
 
 pub use download::example_name;
 pub use downloads::{
-    DownloadEntry, DownloadRequest, DownloadSource, DownloadState, Downloads, Row, SaveRequest, SendError, SentFrom,
+    DownloadEntry, DownloadRequest, DownloadSource, DownloadState, Downloads, Row, SaveRequest, SendError, Sent,
 };
 pub use engine::set_media_options;
 pub use presets::{PresetInfo, presets};

@@ -11,7 +11,7 @@ use super::frame;
 use super::message::{Checked, MediaKind, Reply, Request, check, check_grab, check_page, check_sign_in};
 use crate::grab::Inbox;
 use crate::jobs::Jobs;
-use crate::media::{Downloads, SendError, SentFrom};
+use crate::media::{Downloads, SendError, Sent};
 use crate::settings::Store;
 use crate::vault::{self, Vault};
 
@@ -29,10 +29,12 @@ pub struct Bridge {
 
 // ── Private helpers ───────────────────────
 async fn answer(bridge: &Bridge, request: Request) -> Reply {
-    let (url, kind, page_url, title, headers, cookies) = match request {
+    let (url, kind, page_url, title, headers, cookies, preset) = match request {
         Request::Hello => return Reply::Hello { version: env!("CARGO_PKG_VERSION").into() },
         Request::Grab { page_url, title, finds } => return hand(bridge, &page_url, title.as_deref(), finds),
-        Request::Send { url, kind, page_url, title, headers, cookies } => (url, kind, page_url, title, headers, cookies),
+        Request::Send { url, kind, page_url, title, headers, cookies, preset } => {
+            (url, kind, page_url, title, headers, cookies, preset)
+        }
         Request::Look { url } => return look(bridge, &url).await,
         Request::Site { url } => return site(bridge, &url),
         Request::SignIn { url, cookies } => return sign_in(bridge, &url, cookies),
@@ -40,7 +42,7 @@ async fn answer(bridge: &Bridge, request: Request) -> Reply {
     let checked = check(&url, kind, page_url.as_deref(), title.as_deref(), headers, cookies);
     match (checked, bridge.settings.library_root()) {
         (Err(message), _) | (_, Err(message)) => Reply::Error { message },
-        (Ok(send), Ok(root)) => queue(bridge, send, root).await,
+        (Ok(send), Ok(root)) => queue(bridge, send, root, preset).await,
     }
 }
 
@@ -105,8 +107,9 @@ fn hand(bridge: &Bridge, page_url: &str, title: Option<&str>, finds: Vec<super::
     }
 }
 
-/// Queues a checked send. A sign-in wall becomes `NeedsCookies`, unless this send already carried cookies.
-async fn queue(bridge: &Bridge, send: Checked, root: std::path::PathBuf) -> Reply {
+/// Queues a checked send, with the preset a button named (checked by `media`). A sign-in wall becomes
+/// `NeedsCookies`, unless this send already carried cookies.
+async fn queue(bridge: &Bridge, send: Checked, root: std::path::PathBuf, preset: Option<String>) -> Reply {
     let result = match send.kind {
         MediaKind::Image => bridge
             .downloads
@@ -122,8 +125,8 @@ async fn queue(bridge: &Bridge, send: Checked, root: std::path::PathBuf) -> Repl
                 Some(grant) => Some(grant.cookies),
                 None => None,
             };
-            let from = send.page_url.map(|page_url| SentFrom { page_url, title: send.title });
-            let result = bridge.downloads.send_video(&bridge.jobs, root, &send.url, from, send.headers, cookies).await;
+            let sent = Sent { page_url: send.page_url, title: send.title, preset };
+            let result = bridge.downloads.send_video(&bridge.jobs, root, &send.url, sent, send.headers, cookies).await;
             if let Err(SendError::NeedsLogin { site, .. }) = &result
                 && !given
             {

@@ -3,7 +3,8 @@
 **Status:** Accepted; who registers the host is superseded by
 [ADR-0014](0014-builds-installers-and-host-registration.md) (the app does, from Settings); a content script adds
 Download buttons to pages, and a sent video uses the Settings start preset: [ADR-0035](0035-in-page-download-buttons.md);
-the `look`, `site` and `signIn` messages: [ADR-0042](0042-extension-reads-the-page-first.md).
+the `look`, `site` and `signIn` messages: [ADR-0042](0042-extension-reads-the-page-first.md);
+a send naming its preset: [ADR-0043](0043-mp4-and-mp3-buttons-on-youtube.md).
 **Date:** 2026-11-10
 
 ## Context

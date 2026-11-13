@@ -46,6 +46,7 @@ async function download(ask: DownloadAsk, tab: Browser.tabs.Tab | undefined, fou
       title: ask.title ?? tab?.title ?? null,
       headers,
       cookies: null,
+      preset: ask.preset,
     });
     if (reply.type === "queued") return { state: "sent" };
     if (reply.type === "needsCookies") return { state: "needsSignIn", site: reply.site };

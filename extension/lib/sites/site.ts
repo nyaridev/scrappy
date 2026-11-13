@@ -5,7 +5,8 @@ import type { Target } from "../buttons/button";
 import type { Look } from "../buttons/looks";
 
 // ── Types ─────────────────────────────────
-/** Where one button goes: beside `anchor` (`before` or `after` it) or inside it at the end (`append`). */
+/** Where one button goes: beside `anchor` (`before` or `after` it) or inside it at the end (`append`). Buttons that
+ * share an anchor are told apart by their format. */
 export interface Place extends Target {
   anchor: Element;
   put: "before" | "after" | "append";

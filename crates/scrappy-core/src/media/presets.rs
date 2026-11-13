@@ -166,6 +166,12 @@ mod tests {
     use super::{PRESETS, find, for_send, presets};
 
     #[test]
+    fn has_the_presets_youtubes_buttons_send() {
+        // extension/lib/sites/youtube.ts sends these ids (ADR-0043).
+        assert!(find("editor-mp4").is_some_and(|p| !p.audio) && find("mp3").is_some_and(|p| p.audio));
+    }
+
+    #[test]
     fn a_send_takes_the_start_preset_or_an_audio_one() {
         assert_eq!(for_send(None, true).id, "editor-mp4");
         assert_eq!(for_send(Some("hevc-mp4"), true).id, "hevc-mp4");
