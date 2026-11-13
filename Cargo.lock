@@ -4727,7 +4727,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrappy"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "scrappy-core",
  "serde_json",
@@ -4743,7 +4743,7 @@ dependencies = [
 
 [[package]]
 name = "scrappy-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305",
@@ -4780,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "scrappy-host"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "interprocess",
 ]
