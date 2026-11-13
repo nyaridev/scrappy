@@ -1,5 +1,5 @@
 // useUpdate: what Scrappy's own updater knows (ADR-0037), kept current by its `update-changed` reports. The header
-// shows an update icon from it, and Settings its details.
+// shows the update banner from it (`UpdateBanner`), and Settings its details.
 
 import { useEffect, useState } from "react";
 import { onUpdateChanged, updateStatus } from "../lib/backend";

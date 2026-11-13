@@ -41,7 +41,7 @@ The window shows what Rust sends and passes clicks on. It doesn't decide, comput
   for the session), `useThumbnail.ts` (a library file's thumbnail, or a link's), `useHandedPage.ts` (opens Grab with a
   page the extension handed over), `viewShown.ts` (how many times a view has shown), `KeptView.tsx` (an opened view,
   kept hidden), `openView.ts` (a view opening another), `useDownloads.ts` (the Download list and each download's
-  progress, which the Download, Downloads and Grab views read), `WindowControls.tsx` and `views.ts` (the tabs, and the
+  progress, which the Download, Downloads and Grab views read), `UpdateBanner.tsx` (the update banner under the header), `WindowControls.tsx` and `views.ts` (the tabs, and the
   header's buttons' views). Shared hooks go here too.
 - `src/features/setup/`: the first-run screens (`SetupView`, then `ToolsStep`). They aren't tabs, so they're not in
   `views.ts`.

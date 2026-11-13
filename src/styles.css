@@ -622,3 +622,34 @@ img {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Update banner (ADR-0037) ─────────── */
+/* A slim rounded box under the header, lined up with the views' content like a card, everything centered: the line, a
+   note or error after it, the progress, and the buttons. */
+.update-banner {
+  min-height: 0;
+  margin: 0 var(--iro-space-6);
+  padding: var(--iro-space-2) var(--iro-space-4);
+  border: 1px solid color-mix(in oklab, var(--iro-accent) 35%, var(--iro-line));
+  border-radius: var(--iro-radius-lg);
+}
+
+.update-banner-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--iro-space-1) var(--iro-space-3);
+  align-items: center;
+}
+
+.update-banner-note {
+  color: var(--iro-fg-2);
+  font-size: var(--iro-text-sm);
+}
+
+.update-banner-note[data-tone="danger"] {
+  color: var(--iro-danger);
+}
+
+.update-banner-progress {
+  inline-size: calc(var(--iro-space-6) * 6);
+}

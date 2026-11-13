@@ -24,8 +24,10 @@ wanted.
   no key, and `tauri-action` attaches `latest.json` and the signatures to the draft release.
 - **When it checks:** at start and every 6 hours, while "Check for updates" is on in Settings (on by default, saved
   in the preferences); and when the user clicks Check now. Requests go through the proxy (ADR-0034).
-- **What the user sees:** an update icon in the header when a newer version is out, which opens Settings; Settings'
-  Scrappy section shows the version, what was found and "Update and restart". Installing happens only on that click.
+- **What the user sees:** a banner under the header when a newer version is out: both versions, the downloads a
+  restart stops, the download's progress or the error, "Update and restart" and "Later". Later hides it until the next
+  start (or a still newer version). Settings' About section has the same, with "Check now". Installing happens only on
+  that click.
 - **Where it can't:** a debug build doesn't check (it would replace itself with a release). A failed check is one
   quiet line in Settings, never a popup.
 - **Installers only:** `build.bat` and the release workflow build the installers (NSIS, the macOS disk image, the

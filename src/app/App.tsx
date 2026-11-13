@@ -1,5 +1,5 @@
-// App: the header (name, which opens Home, the view tabs in the middle, the Downloads and Settings buttons) over the
-// selected view, on the backdrop.
+// App: the header (name, which opens Home, the view tabs in the middle, the Downloads and Settings buttons), the update
+// banner when a newer Scrappy is out, and the selected view, on the backdrop.
 // Until there's a library, the first-run screen takes the tabs' place, then the tools step while a tool is missing.
 // The header is also the title bar, following the frame Rust gave the window (ADR-0011). A page the extension hands to
 // Grab opens the Grab view. The browser's own right-click menu is off, except in text fields and selectable text.
@@ -7,7 +7,6 @@
 // `ViewShown` counts its showings, so loads that ran on mount run again.
 
 import { Icon, IconButton, Tabs, Tooltip } from "iro-ui";
-import { ArrowUpCircleIcon } from "iro-ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import icon from "../../assets/brand/icon.svg";
 import { SetupView } from "../features/setup/SetupView";
@@ -15,8 +14,9 @@ import { ToolsStep } from "../features/setup/ToolsStep";
 import { appInfo, libraryStatus } from "../lib/backend";
 import { AppBackdrop } from "./AppBackdrop";
 import { KeptView } from "./KeptView";
-import { OpenView, SETTINGS } from "./openView";
+import { OpenView } from "./openView";
 import { SettingsProvider } from "./SettingsProvider";
+import { UpdateBanner } from "./UpdateBanner";
 import { useCached } from "./useCached";
 import { useHandedPage } from "./useHandedPage";
 import { useUpdate } from "./useUpdate";
@@ -82,14 +82,6 @@ export function App() {
           )}
           {ready && <Tabs variant="nav" aria-label="Views" tabs={TABS} value={current} onValueChange={setCurrent} />}
           <div className="header-end">
-            {ready && update?.latest && (
-              <IconButton
-                icon={<Icon icon={ArrowUpCircleIcon} />}
-                label={`Scrappy ${update.latest} is out`}
-                variant="primary"
-                onClick={() => setCurrent(SETTINGS)}
-              />
-            )}
             {ready &&
               HEADER_VIEWS.map(({ id, label, icon }) => (
                 <IconButton
@@ -104,6 +96,7 @@ export function App() {
             {frame === "custom" && <WindowControls />}
           </div>
         </header>
+        {ready && <UpdateBanner status={update} />}
         {ready ? (
           <OpenView value={setCurrent}>
             <div className="views">
