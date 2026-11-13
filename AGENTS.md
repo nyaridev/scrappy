@@ -16,7 +16,7 @@ page's videos and images to the app. Stage: M15 (changing the library folder) an
 |---|---|
 | `start-dev.bat` | Opens the app with hot reload (`pnpm tauri dev`), installing packages on the first run |
 | `build.bat` | Builds for Windows into `release\`: the installer and the extension's Chrome and Firefox zips |
-| `git tag vX.Y.Z` + push the tag | Builds the signed installers and `latest.json` on GitHub into a draft release (`.github/workflows/release.yml`); publish it for the app's updater to see it (ADR-0037) |
+| `/release <version>` | Cuts a release (`.claude/skills/release/SKILL.md`): version, release notes, checks, `Release <version>` and its tag. Pushing the tag builds the signed installers and `latest.json` on GitHub into a draft release (`.github/workflows/release.yml`); publish it with its notes for the app's updater to see it (ADR-0037) |
 | `pnpm dev` | The window alone in a browser, on fake data (port 4430) |
 | `pnpm check` | Size and boundary checks, tsc (app and extension), Biome, Vitest, `cargo test`, clippy. Must pass before a task is done |
 | `cargo test -p scrappy-core -- --ignored` | Downloads every pinned tool from GitHub (about 300 MB) and searches the three image engines: run it after changing a pin, or when a Hunt engine source fails |
